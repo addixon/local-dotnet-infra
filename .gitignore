@@ -1,0 +1,7 @@
+# Environment secrets — never commit the real .env file
+.env
+
+# OS / editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
