@@ -8,18 +8,44 @@ A local Docker-based infrastructure stack for .NET development and testing. Runs
 
 | Service | Image | Default Port |
 |---|---|---|
-| MS SQL Server 2022 (Developer) | `mcr.microsoft.com/mssql/server:2022-latest` | `1433` |
+| MS SQL Server 2025 (Developer) | `mcr.microsoft.com/mssql/server:2025-latest` | `1433` |
 | PostgreSQL 16 | `postgres:16-alpine` | `5432` |
 | Azure Service Bus Emulator | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | `5672` (AMQP) |
 
-> **License note** – MS SQL Server Developer Edition and the Azure Service Bus Emulator are both free for local development and testing. No paid Docker Desktop subscription is required; use [Docker Engine](https://docs.docker.com/engine/install/) on Linux, [Rancher Desktop](https://rancherdesktop.io/), or [Podman Desktop](https://podman-desktop.io/) on any OS.
+> **License note** – MS SQL Server Developer Edition and the Azure Service Bus Emulator are both free for local development and testing. No paid Docker Desktop subscription is required; install **Rancher Desktop** via `winget install SUSE.RancherDesktop` on Windows, use [Docker Engine](https://docs.docker.com/engine/install/) on Linux, or [Podman Desktop](https://podman-desktop.io/) on any OS.
 
 ---
 
 ## Prerequisites
 
-- A license-free Docker-compatible runtime (Docker Engine, Rancher Desktop, or Podman Desktop)
+- A license-free Docker-compatible runtime (see [Installing Docker on Windows](#installing-docker-on-windows-license-free) below, or use Docker Engine on Linux)
 - `docker compose` CLI (v2+)
+
+---
+
+## Installing Docker on Windows (license-free)
+
+The recommended license-free Docker runtime on Windows is **Rancher Desktop**, which ships a full Docker-compatible CLI and container engine with no subscription required.
+
+Install it with a single WinGet command (run in an **elevated** PowerShell or Command Prompt):
+
+```powershell
+winget install SUSE.RancherDesktop
+```
+
+Rancher Desktop will install `docker` and `docker compose` and make them available on your `PATH`. Reopen your terminal after installation to pick up the new path entries.
+
+> **Tip** – During first launch you will be prompted to choose a container runtime. Select **dockerd (moby)** to get a fully Docker-compatible socket that works with `docker compose`.
+
+### Alternative: Podman Desktop
+
+If you prefer Podman, it is also available via WinGet:
+
+```powershell
+winget install RedHat.Podman-Desktop
+```
+
+> Podman Desktop includes a Docker compatibility layer. After enabling it you can use `docker compose` commands unchanged.
 
 ---
 

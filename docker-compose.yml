@@ -1,5 +1,5 @@
 # docker-compose.yml
-# Local infrastructure stack: MS SQL Server · PostgreSQL · Azure Service Bus Emulator
+# Local infrastructure stack: MS SQL Server 2025 · PostgreSQL · Azure Service Bus Emulator
 #
 # Prerequisites:
 #   - Docker (license-free runtime: Docker Engine on Linux, Rancher Desktop, or Podman)
@@ -13,9 +13,9 @@
 
 services:
 
-  # ── MS SQL Server 2022 (Developer Edition — free for dev/test) ──────────────
+  # ── MS SQL Server 2025 (Developer Edition — free for dev/test) ──────────────
   mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     container_name: local-mssql
     restart: unless-stopped
     environment:
