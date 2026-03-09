@@ -193,7 +193,7 @@ function Wait-AllHealthy {
             foreach ($n in $failed) {
                 Write-Fail "Service '$n' failed to start or is unhealthy."
             }
-            Write-Host "    Check logs: $(Cyan '.\stack.ps1 logs')"
+            Write-Host "    Check logs: $(Cyan ".\stack.ps1 logs")"
             Write-Host ''
             return $false
         }
@@ -211,7 +211,7 @@ function Wait-AllHealthy {
     SpinClear
     Write-Host ''
     Write-Fail "Timed out after $($Script:Timeout)s waiting for containers to become healthy."
-    Write-Host "    Check logs: $(Cyan '.\stack.ps1 logs')"
+    Write-Host "    Check logs: $(Cyan ".\stack.ps1 logs")"
     Write-Host ''
     return $false
 }
@@ -275,7 +275,7 @@ function Assert-Docker {
         Write-Fail 'docker is not on your PATH.'
         Write-Host ''
         Write-Host '    Install a license-free Docker runtime with WinGet:'
-        Write-Host "      $(Cyan 'winget install SUSE.RancherDesktop')"
+        Write-Host "      $(Cyan "winget install SUSE.RancherDesktop")"
         Write-Host ''
         exit 1
     }
@@ -293,8 +293,8 @@ function Assert-EnvFile {
         Write-Warn ".env file not found."
         Write-Host ''
         Write-Host '    Copy the example file and fill in your passwords:'
-        Write-Host "      $(Cyan 'Copy-Item .env.example .env')"
-        Write-Host "    Then open $(Cyan '.env') and replace every placeholder value."
+        Write-Host "      $(Cyan "Copy-Item .env.example .env")"
+        Write-Host "    Then open $(Cyan ".env") and replace every placeholder value."
         Write-Host ''
         exit 1
     }
@@ -372,8 +372,8 @@ function Invoke-Restart {
 function Invoke-Nuke {
     Write-Header 'Nuke stack'
     Write-Host "  $(BRed "  ⚠  WARNING")"
-    Write-Host "  $(Red '     This action permanently deletes all container volumes.')"
-    Write-Host "  $(Red '     All database data (SQL Server, PostgreSQL) will be lost.')"
+    Write-Host "  $(Red "     This action permanently deletes all container volumes.")"
+    Write-Host "  $(Red "     All database data (SQL Server, PostgreSQL) will be lost.")"
     Write-Host ''
     Write-Host "  $(BYellow "Type 'YES' to confirm, or press Enter to abort.")"
     $answer = Read-Host '  >'
@@ -414,7 +414,7 @@ function Invoke-Logs ([string]$SvcFilter) {
     if ($SvcFilter) {
         if ($SvcFilter -notin $validNames) {
             Write-Fail "Unknown service '$SvcFilter'."
-            Write-Host "    Valid services: $(Cyan ($validNames -join ', '))"
+            Write-Host "    Valid services: $(Cyan ($validNames -join ", "))"
             Write-Host ''
             exit 1
         }
@@ -444,7 +444,7 @@ function Invoke-Pull {
 # ─── Usage ────────────────────────────────────────────────────────────────────
 
 function Write-Usage {
-    Write-Host "  Usage:  $(Cyan '.\stack.ps1') $(Yellow '<action>') $(Dim '[service]')"
+    Write-Host "  Usage:  $(Cyan ".\stack.ps1") $(Yellow "<action>") $(Dim "[service]")"
     Write-Host ''
     Write-Host '  Actions:'
     $acts = @(
