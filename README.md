@@ -49,6 +49,30 @@ winget install RedHat.Podman-Desktop
 
 ---
 
+## Managing the stack
+
+Use `stack.ps1` for all day-to-day operations. It validates prerequisites, runs
+the appropriate `docker compose` commands, and verifies the outcome after each action.
+
+```powershell
+.\stack.ps1 <action> [service]
+```
+
+| Action | Description |
+|---|---|
+| `start` | Bring up all services; polls until every container is healthy |
+| `stop` | Stop and remove containers (data volumes are preserved) |
+| `restart` | Full stop/start cycle; waits until healthy |
+| `nuke` | Destroy all containers **and** volumes ⚠ — all data is lost |
+| `status` | Print the current health/status of every container |
+| `logs` | Stream live logs from all services (Ctrl+C to stop) |
+| `logs <service>` | Stream logs from one service (`mssql`, `postgres`, `servicebus`, `servicebus-sql`) |
+| `pull` | Pull the latest images without starting the stack |
+
+Running `.\stack.ps1` with no arguments prints the usage summary.
+
+---
+
 ## Quick start
 
 ### 1. Clone and configure secrets
@@ -152,6 +176,7 @@ Edit [`servicebus/Config.json`](servicebus/Config.json) before starting the stac
 ├── .env.example          # Safe-to-commit template — copy to .env and fill in secrets
 ├── .gitignore            # Ensures .env is never committed
 ├── docker-compose.yml    # All service definitions
+├── stack.ps1             # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull)
 ├── servicebus/
 │   └── Config.json       # Azure Service Bus emulator namespace / queue / topic config
 └── README.md
