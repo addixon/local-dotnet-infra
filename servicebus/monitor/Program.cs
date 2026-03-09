@@ -107,7 +107,9 @@ internal static class Program
             return 1;
         }
 
-        // Connection string for the local emulator
+        // Well-known connection string for the Azure Service Bus Emulator.
+        // "SAS_KEY_VALUE" is the default placeholder accepted by the emulator;
+        // it does not represent a real secret.
         const string connectionString =
             "Endpoint=sb://localhost;" +
             "SharedAccessKeyName=RootManageSharedAccessKey;" +
@@ -193,9 +195,14 @@ internal static class Program
                 }
             }
             catch (OperationCanceledException) { break; }
-            catch
+            catch (ServiceBusException)
             {
-                // Transient error — retry after delay
+                // Transient Service Bus errors (e.g. connection lost) — retry after delay
+            }
+            catch (Exception ex)
+            {
+                // Unexpected error — surface once via stderr, then continue polling
+                Console.Error.WriteLine($"[monitor] Error polling {topicName}/{subscriptionName}: {ex.Message}");
             }
 
             try { await Task.Delay(1000, ct); }
