@@ -17,6 +17,7 @@
       status   – Print the current state of every container
       logs     – Stream recent logs, optionally filtered to one service
       pull     – Pull latest images without starting the stack
+      monitor  – Monitor Service Bus topics for new messages (interactive TUI)
 
 .PARAMETER Service
     For the 'logs' action: limit output to this service name
@@ -31,11 +32,12 @@
     .\stack.ps1 logs
     .\stack.ps1 logs mssql
     .\stack.ps1 pull
+    .\stack.ps1 monitor
 #>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'nuke', 'status', 'logs', 'pull', IgnoreCase = $true)]
+    [ValidateSet('start', 'stop', 'restart', 'nuke', 'status', 'logs', 'pull', 'monitor', IgnoreCase = $true)]
     [string]$Action,
 
     [Parameter(Position = 1)]
@@ -441,6 +443,46 @@ function Invoke-Pull {
     Write-Host ''
 }
 
+# ─── Monitor ──────────────────────────────────────────────────────────────
+
+function Invoke-Monitor {
+    Write-Header 'Service Bus Monitor'
+
+    # Ensure dotnet SDK is available
+    if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+        Write-Fail 'dotnet SDK is not on your PATH.'
+        Write-Host "    The monitor requires the .NET SDK (8.0+)."
+        Write-Host "    Install it from: $(Cyan 'https://dot.net/download')"
+        Write-Host ''
+        exit 1
+    }
+
+    # Ensure the service bus emulator is running
+    $sbStatus = Get-CStatus 'local-servicebus'
+    if ($sbStatus -ne 'running') {
+        Write-Fail 'Service Bus emulator is not running.'
+        Write-Host "    Start the stack first: $(Cyan '.\stack.ps1 start')"
+        Write-Host ''
+        exit 1
+    }
+
+    $monitorProject = Join-Path $PSScriptRoot 'servicebus' 'monitor'
+    $configFile     = Join-Path $PSScriptRoot 'servicebus' 'Config.json'
+
+    Write-Step 'Building monitor tool (first run may take a moment)…'
+    $buildOutput = & dotnet build $monitorProject -c Release --nologo -v quiet 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail 'Failed to build monitor tool.'
+        $buildOutput | ForEach-Object { Write-Host "    $_" }
+        Write-Host ''
+        exit 1
+    }
+    Write-Success 'Monitor tool ready.'
+    Write-Host ''
+
+    & dotnet run --project $monitorProject -c Release --no-build -- $configFile
+}
+
 # ─── Usage ────────────────────────────────────────────────────────────────────
 
 function Write-Usage {
@@ -455,6 +497,7 @@ function Write-Usage {
         @{ A = 'status';  D = 'Show current state of every container'              }
         @{ A = 'logs';    D = 'Stream logs (optionally filtered to one service)'   }
         @{ A = 'pull';    D = 'Pull latest images without starting'                }
+        @{ A = 'monitor'; D = 'Monitor Service Bus topics for new messages'        }
     )
     foreach ($a in $acts) {
         Write-Host "    $(Yellow ($a.A.PadRight(12))) $(Dim $a.D)"
@@ -481,4 +524,5 @@ switch ($Action.ToLower()) {
     'status'  {                 Invoke-Status             }
     'logs'    {                 Invoke-Logs $Service      }
     'pull'    {                 Invoke-Pull               }
+    'monitor' {                 Invoke-Monitor            }
 }
