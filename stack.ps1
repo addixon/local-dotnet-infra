@@ -96,20 +96,20 @@ function Write-Banner {
     $bar = '─' * 53
     Write-Host ''
     Write-Host "  $(BCyan "╭${bar}╮")"
-    Write-Host "  $(BCyan '│')    $(BWhite 'local-infrastructure')$(Dim '  ·  Docker stack manager')    $(BCyan '│')"
+    Write-Host "  $(BCyan "│")    $(BWhite "local-infrastructure")$(Dim "  ·  Docker stack manager")    $(BCyan "│")"
     Write-Host "  $(BCyan "╰${bar}╯")"
     Write-Host ''
 }
 
 function Write-Header ([string]$Text) {
-    Write-Host "  $(BCyan '▶') $(Bold $Text)"
+    Write-Host "  $(BCyan "▶") $(Bold $Text)"
     Write-Host ''
 }
 
-function Write-Step    ([string]$Text) { Write-Host "    $(Cyan '·') $Text" }
-function Write-Success ([string]$Text) { Write-Host "    $(BGreen '✓') $Text" }
-function Write-Warn    ([string]$Text) { Write-Host "    $(BYellow '⚠') $Text" }
-function Write-Fail    ([string]$Text) { Write-Host "    $(BRed '✗') $Text" }
+function Write-Step    ([string]$Text) { Write-Host "    $(Cyan "·") $Text" }
+function Write-Success ([string]$Text) { Write-Host "    $(BGreen "✓") $Text" }
+function Write-Warn    ([string]$Text) { Write-Host "    $(BYellow "⚠") $Text" }
+function Write-Fail    ([string]$Text) { Write-Host "    $(BRed "✗") $Text" }
 
 # ─── Spinner ──────────────────────────────────────────────────────────────────
 
@@ -371,7 +371,7 @@ function Invoke-Restart {
 
 function Invoke-Nuke {
     Write-Header 'Nuke stack'
-    Write-Host "  $(BRed '  ⚠  WARNING')"
+    Write-Host "  $(BRed "  ⚠  WARNING")"
     Write-Host "  $(Red '     This action permanently deletes all container volumes.')"
     Write-Host "  $(Red '     All database data (SQL Server, PostgreSQL) will be lost.')"
     Write-Host ''
@@ -451,7 +451,7 @@ function Write-Usage {
         @{ A = 'start';   D = 'Start all services and wait until healthy'          }
         @{ A = 'stop';    D = 'Stop and remove containers (volumes preserved)'     }
         @{ A = 'restart'; D = 'Full stop/start cycle; waits for healthy state'     }
-        @{ A = 'nuke';    D = "Destroy containers AND volumes  $(BRed '⚠ data loss')" }
+        @{ A = 'nuke';    D = "Destroy containers AND volumes  $(BRed "⚠ data loss")" }
         @{ A = 'status';  D = 'Show current state of every container'              }
         @{ A = 'logs';    D = 'Stream logs (optionally filtered to one service)'   }
         @{ A = 'pull';    D = 'Pull latest images without starting'                }
