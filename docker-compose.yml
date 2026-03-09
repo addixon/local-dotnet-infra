@@ -55,7 +55,7 @@ services:
 
   # ── Azure Service Bus Emulator (internal SQL Server dependency) ───────────────
   servicebus-sql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     container_name: local-servicebus-sql
     restart: unless-stopped
     environment:

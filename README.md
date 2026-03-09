@@ -89,6 +89,16 @@ Open `.env` in your editor and replace every placeholder value with a real passw
 
 ### 2. Start the stack
 
+**Recommended** – Use the PowerShell stack manager for automatic health verification:
+
+```powershell
+.\stack.ps1 start
+```
+
+This starts all services, polls health checks, and reports when the stack is fully ready.
+
+**Alternative** – Use Docker Compose directly (no automatic health verification):
+
 ```bash
 docker compose up -d
 ```
@@ -113,15 +123,15 @@ Copy `.env.example` to `.env` and replace the placeholder values. **Never commit
 # SA (system-administrator) password.
 # Must meet SQL Server complexity requirements:
 #   min 8 chars, upper + lower + digit + special character.
-MSSQL_SA_PASSWORD=YourStrong(!)Passw0rd
+MSSQL_SA_PASSWORD=<REPLACE_WITH_YOUR_PASSWORD>
 
 # Host port to expose SQL Server on (default: 1433)
 MSSQL_PORT=1433
 
 # ─── PostgreSQL ──────────────────────────────────────────────────────────────
-POSTGRES_USER=localuser
-POSTGRES_PASSWORD=YourPostgresPassword1!
-POSTGRES_DB=localdb
+POSTGRES_USER=<REPLACE_WITH_USERNAME>
+POSTGRES_PASSWORD=<REPLACE_WITH_YOUR_PASSWORD>
+POSTGRES_DB=<REPLACE_WITH_DATABASE_NAME>
 
 # Host port to expose PostgreSQL on (default: 5432)
 POSTGRES_PORT=5432
@@ -129,7 +139,7 @@ POSTGRES_PORT=5432
 # ─── Azure Service Bus Emulator ──────────────────────────────────────────────
 # SA password for the internal SQL Server used by the Service Bus emulator.
 # Must meet the same SQL Server complexity requirements as MSSQL_SA_PASSWORD.
-SERVICEBUS_SQL_PASSWORD=YourStrong(!)Passw0rd
+SERVICEBUS_SQL_PASSWORD=<REPLACE_WITH_YOUR_PASSWORD>
 
 # Host port to expose the Service Bus AMQP endpoint on (default: 5672)
 SERVICEBUS_PORT=5672
@@ -153,10 +163,16 @@ Host=localhost;Port=5432;Database=<POSTGRES_DB>;Username=<POSTGRES_USER>;Passwor
 
 ### Azure Service Bus Emulator
 
-Use the well-known development connection string (the emulator accepts it regardless of your namespace name):
+The emulator accepts a well-known development connection string (works regardless of your configured namespace name):
 
 ```
 Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+```
+
+Replace `SAS_KEY_VALUE` with any non-empty string (the emulator doesn't validate it). Example:
+
+```
+Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=DEVKEY123;UseDevelopmentEmulator=true;
 ```
 
 > The `UseDevelopmentEmulator=true` flag is supported by **Azure.Messaging.ServiceBus** ≥ 7.18.0.
@@ -166,6 +182,92 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 ## Customising Service Bus queues and topics
 
 Edit [`servicebus/Config.json`](servicebus/Config.json) before starting the stack (or restart the `servicebus` container after editing). The file defines the namespace, queues, and topics the emulator exposes. The default configuration ships with one example queue (`queue.1`) and one topic (`topic.1`) with one subscription (`subscription.1`).
+
+---
+
+## Troubleshooting
+
+### Containers show as unhealthy
+
+If `.\stack.ps1 status` or `docker ps` shows containers as unhealthy:
+
+1. **Check logs** for the failing service:
+   ```powershell
+   .\stack.ps1 logs <service-name>
+   # Example: .\stack.ps1 logs mssql
+   ```
+
+2. **Common causes**:
+   - **SQL Server containers** (mssql, servicebus-sql): Password doesn't meet complexity requirements (min 8 chars, upper + lower + digit + special character)
+   - **PostgreSQL**: Wrong credentials in `.env` file
+   - **Service Bus**: Internal SQL Server (servicebus-sql) not healthy yet
+
+3. **Reset and try again**:
+   ```powershell
+   .\stack.ps1 stop
+   .\stack.ps1 start
+   ```
+
+### Port already in use
+
+If you see "port is already allocated" errors:
+
+1. **Check what's using the port**:
+   ```powershell
+   # Windows
+   netstat -ano | findstr :<port>
+   # Example: netstat -ano | findstr :1433
+
+   # Linux/Mac
+   lsof -i :<port>
+   ```
+
+2. **Change the port** in `.env`:
+   ```env
+   MSSQL_PORT=1434        # instead of 1433
+   POSTGRES_PORT=5433     # instead of 5432
+   SERVICEBUS_PORT=5673   # instead of 5672
+   ```
+
+3. **Restart the stack**:
+   ```powershell
+   .\stack.ps1 restart
+   ```
+
+### Stack takes too long to start
+
+If `.\stack.ps1 start` times out after 120 seconds:
+
+1. **Check Docker resources** – Ensure Docker has enough CPU and memory allocated (especially SQL Server)
+
+2. **Pull images first** to avoid download time during startup:
+   ```powershell
+   .\stack.ps1 pull
+   ```
+
+3. **Check logs** to see which service is slow:
+   ```powershell
+   .\stack.ps1 logs
+   ```
+
+### Can't connect to SQL Server
+
+If your application can't connect:
+
+1. **Verify container is healthy**:
+   ```powershell
+   .\stack.ps1 status
+   ```
+
+2. **Check connection string** uses `TrustServerCertificate=True`:
+   ```
+   Server=localhost,1433;User Id=sa;Password=<MSSQL_SA_PASSWORD>;TrustServerCertificate=True;
+   ```
+
+3. **Test connectivity** with sqlcmd:
+   ```bash
+   docker exec -it local-mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<MSSQL_SA_PASSWORD>" -C -Q "SELECT @@VERSION"
+   ```
 
 ---
 
