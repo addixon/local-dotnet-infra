@@ -187,7 +187,9 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ## Customising Service Bus queues and topics
 
-Copy `servicebus/Config.example.json` to `servicebus/Config.json` (if you haven't already) and edit it to define the namespace, queues, and topics the emulator exposes. The example configuration ships with one queue (`queue.1`) and one topic (`topic.1`) with one subscription (`subscription.1`).
+Copy `servicebus/Config.example.json` to `servicebus/Config.json` (if you haven't already) and edit it to define the namespace, queues, and topics the emulator exposes. The example configuration ships with one queue (`queue.1`) and one topic (`topic.1`) with two subscriptions (`subscription.1` and `monitor`).
+
+> **Important** — Every topic must include a `monitor` subscription. The Service Bus monitor tool (`.\stack.ps1 monitor`) uses this subscription exclusively so that monitoring does not interfere with your application's own subscriptions. If a topic is missing the `monitor` subscription, the monitor will log errors to stderr and retry with exponential backoff until the subscription becomes available.
 
 **Never commit `servicebus/Config.json`** — it is listed in `.gitignore`, just like `.env`. The example file (`Config.example.json`) is the safe-to-commit template.
 
