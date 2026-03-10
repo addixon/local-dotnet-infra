@@ -6,11 +6,11 @@ A local Docker-based infrastructure stack for .NET development and testing. Runs
 
 ## Services
 
-| Service | Image | Default Port |
+| Service | Image | Default Port(s) |
 |---|---|---|
 | MS SQL Server 2025 (Developer) | `mcr.microsoft.com/mssql/server:2025-latest` | `1433` |
 | PostgreSQL 16 | `postgres:16-alpine` | `5432` |
-| Azure Service Bus Emulator | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | `5672` (AMQP) |
+| Azure Service Bus Emulator | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | `5672` (AMQP), `5300` (management/health) |
 
 > **License note** – MS SQL Server Developer Edition and the Azure Service Bus Emulator are both free for local development and testing. No paid Docker Desktop subscription is required; install **Rancher Desktop** via `winget install SUSE.RancherDesktop` on Windows, use [Docker Engine](https://docs.docker.com/engine/install/) on Linux, or [Podman Desktop](https://podman-desktop.io/) on any OS.
 
@@ -146,6 +146,9 @@ SERVICEBUS_SQL_PASSWORD=<REPLACE_WITH_YOUR_PASSWORD>
 
 # Host port to expose the Service Bus AMQP endpoint on (default: 5672)
 SERVICEBUS_PORT=5672
+
+# Host port to expose the Service Bus management/health endpoint on (default: 5300)
+SERVICEBUS_MGMT_PORT=5300
 ```
 
 ---
