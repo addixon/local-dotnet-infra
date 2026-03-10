@@ -12,7 +12,7 @@ Repository: `https://github.com/addixon/local-infrastructure`
 .
 ├── .env.example             # Template — copy to .env and set passwords
 ├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
-├── docker-compose.yml       # Docker Compose service definitions with health checks
+├── docker-compose.yml       # Docker Compose service definitions with health checks (servicebus monitored externally)
 ├── stack.ps1                # PowerShell 7.0+ stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Full user documentation
 └── servicebus/
@@ -43,7 +43,7 @@ Four containers make up the stack:
 | MS SQL Server 2025 | `local-mssql` | `mcr.microsoft.com/mssql/server:2025-latest` | 1433 | `sqlcmd SELECT 1` (15 s interval) |
 | PostgreSQL 16 | `local-postgres` | `postgres:16-alpine` | 5432 | `pg_isready` (10 s interval) |
 | Service Bus SQL (internal) | `local-servicebus-sql` | `mcr.microsoft.com/mssql/server:2025-latest` | none | `sqlcmd SELECT 1` (15 s interval) |
-| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | HTTP GET `/health` (10 s interval) |
+| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | Host-side HTTP GET `/health` via stack.ps1 (container has no shell) |
 
 All services use `restart: unless-stopped`, named Docker volumes for persistence, and proper `depends_on` with health conditions.
 
@@ -158,7 +158,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 ## Important Rules
 
-1. **Health checks are essential** — every Docker service needs one. `stack.ps1` and `depends_on` conditions depend on them.
+1. **Health checks are essential** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 (no in-container healthcheck). `stack.ps1` and `depends_on` conditions depend on them.
 2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **SQL Server password complexity** — min 8 characters, mixed case, at least one digit, at least one special character.
 4. **Service Bus dependency chain** — `servicebus` starts only after `servicebus-sql` passes health checks.

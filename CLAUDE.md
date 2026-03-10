@@ -12,7 +12,7 @@ Repository: `https://github.com/addixon/local-infrastructure`
 .
 ├── .env.example             # Template — copy to .env and set passwords
 ├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
-├── docker-compose.yml       # Docker Compose service definitions with health checks
+├── docker-compose.yml       # Docker Compose service definitions with health checks (servicebus monitored externally)
 ├── stack.ps1                # PowerShell 7.0+ stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Full user documentation
 └── servicebus/
@@ -39,7 +39,7 @@ Four containers run in the stack:
 1. **`local-mssql`** — MS SQL Server 2025 Developer on port 1433. Health checked with `sqlcmd`.
 2. **`local-postgres`** — PostgreSQL 16 Alpine on port 5432. Health checked with `pg_isready`.
 3. **`local-servicebus-sql`** — Internal SQL Server for the Service Bus emulator (no exposed port). Health checked with `sqlcmd`.
-4. **`local-servicebus`** — Azure Service Bus Emulator on ports 5672 (AMQP) and 5300 (management/health). Health checked with HTTP GET to `/health`. Depends on `servicebus-sql` being healthy.
+4. **`local-servicebus`** — Azure Service Bus Emulator on ports 5672 (AMQP) and 5300 (management/health). Health is probed from the host by stack.ps1 via HTTP GET to `/health` (the container image has no shell for Docker healthchecks). Depends on `servicebus-sql` being healthy.
 
 All services use `restart: unless-stopped` and named Docker volumes for data persistence.
 
@@ -149,7 +149,7 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ## Important Rules
 
-1. **Health checks are essential** — every Docker service must have one. `stack.ps1` and `depends_on` conditions rely on them.
+1. **Health checks are essential** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 because its image lacks a shell. `stack.ps1` and `depends_on` conditions rely on them.
 2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **Password complexity** — SQL Server passwords must meet: min 8 characters, mixed case, at least one digit, at least one special character.
 4. **Service Bus depends on its internal SQL Server** — `servicebus` starts only after `servicebus-sql` is healthy.

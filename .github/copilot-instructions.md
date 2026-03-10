@@ -24,7 +24,7 @@ Repository: `https://github.com/addixon/local-infrastructure`
 .
 ├── .env.example             # Template — copy to .env and set real passwords
 ├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
-├── docker-compose.yml       # All service definitions with health checks
+├── docker-compose.yml       # All service definitions with health checks (servicebus monitored externally)
 ├── stack.ps1                # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Comprehensive user documentation
 └── servicebus/
@@ -41,7 +41,7 @@ Repository: `https://github.com/addixon/local-infrastructure`
 | MS SQL Server 2025 | `local-mssql` | `mcr.microsoft.com/mssql/server:2025-latest` | 1433 | `sqlcmd SELECT 1` (15 s interval) |
 | PostgreSQL 16 | `local-postgres` | `postgres:16-alpine` | 5432 | `pg_isready` (10 s interval) |
 | Service Bus SQL (internal) | `local-servicebus-sql` | `mcr.microsoft.com/mssql/server:2025-latest` | none (internal) | `sqlcmd SELECT 1` (15 s interval) |
-| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | HTTP GET `/health` (10 s interval) |
+| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | Host-side HTTP GET `/health` via stack.ps1 (container has no shell) |
 
 All services use `restart: unless-stopped`, named volumes for persistence, and proper `depends_on` with health conditions.
 
@@ -68,7 +68,7 @@ All services use `restart: unless-stopped`, named volumes for persistence, and p
 
 ### Docker Compose (`docker-compose.yml`)
 
-- Every service must include a `healthcheck` block.
+- All services are health-checked; `servicebus` is probed from the host via stack.ps1 because its image lacks a shell (no Docker `healthcheck` block).
 - Use environment variable substitution with defaults: `${VAR:-default}`.
 - All secrets must come from the `.env` file — never hard-code passwords.
 - Define named volumes for any persistent data.
@@ -155,7 +155,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 ## Key Guidelines for Changes
 
-1. **Health checks are critical** — every Docker service must have a working health check so `stack.ps1` and `depends_on` conditions work correctly.
+1. **Health checks are critical** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 (no in-container healthcheck) so `stack.ps1` and `depends_on` conditions work correctly.
 2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **Test on PowerShell 7.0+** — the management script requires it.
 4. **Maintain the TUI styling** — both `stack.ps1` and `Program.cs` share a consistent ANSI/Unicode visual style; keep it consistent when modifying either.
