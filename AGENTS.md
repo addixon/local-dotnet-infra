@@ -11,12 +11,12 @@ Repository: `https://github.com/addixon/local-infrastructure`
 ```
 .
 ├── .env.example             # Template — copy to .env and set passwords
-├── .gitignore               # Excludes .env, build artifacts, OS files
+├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
 ├── docker-compose.yml       # Docker Compose service definitions with health checks
 ├── stack.ps1                # PowerShell 7.0+ stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Full user documentation
 └── servicebus/
-    ├── Config.json           # Azure Service Bus emulator entity configuration (queues, topics, subscriptions)
+    ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
     └── monitor/
         ├── Program.cs        # Interactive TUI for monitoring Service Bus messages (.NET 8 / C#)
         └── ServiceBusMonitor.csproj  # .NET 8 project file
@@ -32,7 +32,7 @@ Repository: `https://github.com/addixon/local-infrastructure`
 | Message broker | Azure Service Bus Emulator (AMQP on port 5672, management on 5300) |
 | Stack management script | PowerShell 7.0+ (`stack.ps1`) |
 | Service Bus monitor tool | C# / .NET 8.0 (`servicebus/monitor/Program.cs`) |
-| Configuration | Environment variables via `.env`, JSON for Service Bus entities |
+| Configuration | Environment variables via `.env`, JSON for Service Bus entities (`Config.example.json` → `Config.json`) |
 
 ## Docker Services
 
@@ -112,7 +112,7 @@ dotnet build
 dotnet run
 ```
 
-The monitor auto-discovers topics and subscriptions from `servicebus/Config.json`, peeks messages in real time, and provides an interactive TUI with arrow-key navigation.
+The monitor auto-discovers topics and subscriptions from `servicebus/Config.json` (copied from `Config.example.json`), peeks messages in real time, and provides an interactive TUI with arrow-key navigation.
 
 ## Coding Conventions
 
@@ -143,9 +143,10 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 - Define named volumes for persistent data.
 - Descriptive comment headers for each service section.
 
-### JSON (`servicebus/Config.json`)
+### JSON (`servicebus/Config.example.json`)
 
 - 2-space indentation. Follow the Azure Service Bus Emulator schema.
+- `Config.example.json` is the safe-to-commit template; `Config.json` is the user's local copy (git-ignored).
 
 ### General Patterns
 
@@ -153,12 +154,12 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 - Error messages should be clear and actionable.
 - Degrade gracefully when optional features are unavailable (e.g. ANSI terminal support).
 - No secrets in source code — `.env` is always git-ignored.
-- Keep `.env.example` and `README.md` in sync when adding environment variables.
+- Keep `.env.example`, `Config.example.json`, and `README.md` in sync when adding environment variables or Service Bus entities.
 
 ## Important Rules
 
 1. **Health checks are essential** — every Docker service needs one. `stack.ps1` and `depends_on` conditions depend on them.
-2. **Never commit `.env`** — contains secrets; always git-ignored.
+2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **SQL Server password complexity** — min 8 characters, mixed case, at least one digit, at least one special character.
 4. **Service Bus dependency chain** — `servicebus` starts only after `servicebus-sql` passes health checks.
 5. **Maintain TUI visual consistency** — `stack.ps1` and `Program.cs` share a design language; preserve it.
@@ -166,7 +167,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 7. **No CI/CD pipelines** — this is an infrastructure-only repository.
 8. **No test infrastructure** — there are no unit or integration tests.
 9. **PowerShell 7.0+ only** — do not introduce syntax that breaks on PowerShell 7.
-10. **Keep `.env.example` updated** — any new environment variables in `docker-compose.yml` must also appear in `.env.example` with placeholder values and be documented in `README.md`.
+10. **Keep `.env.example` and `Config.example.json` updated** — any new environment variables in `docker-compose.yml` must also appear in `.env.example` with placeholder values and be documented in `README.md`. Changes to Service Bus entities should be reflected in `Config.example.json`.
 
 ## Troubleshooting
 
@@ -178,7 +179,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 ## Service Bus Customisation
 
-Edit `servicebus/Config.json` to add or remove queues, topics, and subscriptions. The default configuration includes:
+Copy `servicebus/Config.example.json` to `servicebus/Config.json` and edit it to add or remove queues, topics, and subscriptions. The example configuration includes:
 
 - Namespace: `local-namespace`
 - Queue: `queue.1`

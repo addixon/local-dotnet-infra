@@ -75,17 +75,20 @@ Running `.\stack.ps1` with no arguments prints the usage summary.
 
 ## Quick start
 
-### 1. Clone and configure secrets
+### 1. Clone and configure
 
 ```bash
 git clone https://github.com/addixon/local-infrastructure.git
 cd local-infrastructure
 
-# Copy the example file and fill in your own passwords
+# Copy example files and fill in your own values
 cp .env.example .env
+cp servicebus/Config.example.json servicebus/Config.json
 ```
 
 Open `.env` in your editor and replace every placeholder value with a real password. See [`.env` reference](#env-reference) below.
+
+Optionally edit `servicebus/Config.json` to customise queues, topics, and subscriptions (see [Customising Service Bus](#customising-service-bus-queues-and-topics)).
 
 ### 2. Start the stack
 
@@ -181,7 +184,11 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ## Customising Service Bus queues and topics
 
-Edit [`servicebus/Config.json`](servicebus/Config.json) before starting the stack (or restart the `servicebus` container after editing). The file defines the namespace, queues, and topics the emulator exposes. The default configuration ships with one example queue (`queue.1`) and one topic (`topic.1`) with one subscription (`subscription.1`).
+Copy `servicebus/Config.example.json` to `servicebus/Config.json` (if you haven't already) and edit it to define the namespace, queues, and topics the emulator exposes. The example configuration ships with one queue (`queue.1`) and one topic (`topic.1`) with one subscription (`subscription.1`).
+
+**Never commit `servicebus/Config.json`** — it is listed in `.gitignore`, just like `.env`. The example file (`Config.example.json`) is the safe-to-commit template.
+
+Restart the `servicebus` container after editing the config file.
 
 ---
 
@@ -275,11 +282,12 @@ If your application can't connect:
 
 ```
 .
-├── .env.example          # Safe-to-commit template — copy to .env and fill in secrets
-├── .gitignore            # Ensures .env is never committed
-├── docker-compose.yml    # All service definitions
-├── stack.ps1             # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull)
+├── .env.example              # Safe-to-commit template — copy to .env and fill in secrets
+├── .gitignore                # Ensures .env and Config.json are never committed
+├── docker-compose.yml        # All service definitions
+├── stack.ps1                 # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull)
 ├── servicebus/
-│   └── Config.json       # Azure Service Bus emulator namespace / queue / topic config
+│   ├── Config.example.json   # Safe-to-commit template — copy to Config.json and customise
+│   └── monitor/              # Interactive Service Bus message monitor (.NET 8 TUI)
 └── README.md
 ```

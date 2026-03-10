@@ -51,6 +51,7 @@ $ErrorActionPreference = 'Stop'
 
 $Script:ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $Script:EnvFile     = Join-Path $PSScriptRoot '.env'
+$Script:ConfigFile  = Join-Path $PSScriptRoot 'servicebus' 'Config.json'
 $Script:Timeout     = 180   # seconds before health-wait gives up
 
 # Services in start-up dependency order, with container names and health-check style.
@@ -344,6 +345,17 @@ function Assert-EnvFile {
     }
 }
 
+function Assert-ConfigFile {
+    if (-not (Test-Path $Script:ConfigFile)) {
+        Write-Warn "servicebus/Config.json not found."
+        Write-Host ''
+        Write-Host '    Copy the example file and customise your queues/topics:'
+        Write-Host "      $(Cyan "Copy-Item servicebus/Config.example.json servicebus/Config.json")"
+        Write-Host ''
+        exit 1
+    }
+}
+
 # ─── Actions ──────────────────────────────────────────────────────────────────
 
 function Invoke-Start {
@@ -524,7 +536,6 @@ function Invoke-Monitor {
     }
 
     $monitorProject = Join-Path $PSScriptRoot 'servicebus' 'monitor'
-    $configFile     = Join-Path $PSScriptRoot 'servicebus' 'Config.json'
 
     Write-Step 'Building monitor tool (first run may take a moment)…'
     $buildOutput = & dotnet build $monitorProject -c Release --nologo -v quiet 2>&1
@@ -537,7 +548,7 @@ function Invoke-Monitor {
     Write-Success 'Monitor tool ready.'
     Write-Host ''
 
-    & dotnet run --project $monitorProject -c Release --no-build -- $configFile
+    & dotnet run --project $monitorProject -c Release --no-build -- $Script:ConfigFile
 }
 
 # ─── Usage ────────────────────────────────────────────────────────────────────
@@ -574,12 +585,12 @@ if (-not $Action) {
 Assert-Docker
 
 switch ($Action.ToLower()) {
-    'start'   { Assert-EnvFile; Invoke-Start              }
-    'stop'    {                 Invoke-Stop               }
-    'restart' { Assert-EnvFile; Invoke-Restart            }
-    'nuke'    {                 Invoke-Nuke               }
-    'status'  {                 Invoke-Status             }
-    'logs'    {                 Invoke-Logs $Service      }
-    'pull'    {                 Invoke-Pull               }
-    'monitor' { Assert-EnvFile; Invoke-Monitor            }
+    'start'   { Assert-EnvFile; Assert-ConfigFile; Invoke-Start              }
+    'stop'    {                                    Invoke-Stop               }
+    'restart' { Assert-EnvFile; Assert-ConfigFile; Invoke-Restart            }
+    'nuke'    {                                    Invoke-Nuke               }
+    'status'  {                                    Invoke-Status             }
+    'logs'    {                                    Invoke-Logs $Service      }
+    'pull'    {                                    Invoke-Pull               }
+    'monitor' { Assert-EnvFile; Assert-ConfigFile; Invoke-Monitor            }
 }

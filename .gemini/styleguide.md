@@ -11,12 +11,12 @@ Repository: `https://github.com/addixon/local-infrastructure`
 ```
 .
 ├── .env.example             # Template — copy to .env and set passwords
-├── .gitignore               # Excludes .env, build artifacts, OS files
+├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
 ├── docker-compose.yml       # Docker Compose service definitions with health checks
 ├── stack.ps1                # PowerShell 7.0+ stack manager
 ├── README.md                # Full user documentation
 └── servicebus/
-    ├── Config.json           # Azure Service Bus emulator entity configuration
+    ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
     └── monitor/
         ├── Program.cs        # Interactive TUI for monitoring Service Bus messages (.NET 8 / C#)
         └── ServiceBusMonitor.csproj  # .NET 8 project file
@@ -136,10 +136,11 @@ dotnet run
 - Never hard-code secrets. Define named volumes for persistent data.
 - Add descriptive comment headers for each service section using `# ─── ... ───`.
 
-### JSON (`servicebus/Config.json`)
+### JSON (`servicebus/Config.example.json`)
 
 - 2-space indentation.
 - Follow the Azure Service Bus Emulator configuration schema exactly.
+- `Config.example.json` is the safe-to-commit template; `Config.json` is the user's local copy (git-ignored).
 
 ### General Principles
 
@@ -147,12 +148,12 @@ dotnet run
 - Error messages are clear and actionable.
 - Degrade gracefully when optional features are unavailable.
 - No secrets in source — `.env` is git-ignored.
-- Keep `.env.example` and `README.md` in sync when adding new environment variables.
+- Keep `.env.example`, `Config.example.json`, and `README.md` in sync when adding new environment variables or Service Bus entities.
 
 ## Important Rules
 
 1. **Health checks are critical** — all Docker services must have one; `stack.ps1` and `depends_on` rely on them.
-2. **Never commit `.env`** — secrets stay out of source control.
+2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **SQL Server password complexity** — min 8 characters, mixed case, digit, and special character required.
 4. **Service Bus depends on internal SQL** — `servicebus` starts only after `servicebus-sql` is healthy.
 5. **Maintain TUI consistency** — `stack.ps1` and `Program.cs` share a visual style; preserve it.
