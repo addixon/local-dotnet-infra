@@ -37,7 +37,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('start', 'stop', 'restart', 'nuke', 'status', 'logs', 'pull', 'monitor', IgnoreCase = $true)]
+    [ValidateSet('start', 'stop', 'restart', 'nuke', 'status', 'logs', 'pull', 'monitor')]
     [string]$Action,
 
     [Parameter(Position = 1)]
