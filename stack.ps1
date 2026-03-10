@@ -500,7 +500,7 @@ function Invoke-Pull {
 # ─── Monitor ──────────────────────────────────────────────────────────────
 
 function Invoke-Monitor {
-    Write-Header 'Service Bus Monitor'
+    Write-Header 'Service Bus Monitor '
 
     # Ensure dotnet SDK is available
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
