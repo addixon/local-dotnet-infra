@@ -11,3 +11,5 @@ Thumbs.db
 # .NET build artifacts (servicebus monitor tool)
 servicebus/monitor/bin/
 servicebus/monitor/obj/
+servicebus/Config.json
+/servicebus/Config.json
