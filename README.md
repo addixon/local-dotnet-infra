@@ -1,6 +1,22 @@
-# local-infrastructure
+# Local Infrastructure
 
-A local Docker-based infrastructure stack for .NET development and testing. Runs **MS SQL Server**, **PostgreSQL**, and the **Azure Service Bus Emulator** in a fully license-free environment so you can exercise complete stacks without any cloud costs or service dependencies.
+A Docker-based local development stack providing **MS SQL Server 2025**, **PostgreSQL 16**, and the **Azure Service Bus Emulator** — everything you need to develop and test .NET applications locally without cloud costs, paid licenses, or external service dependencies.
+
+---
+
+## Table of Contents
+
+- [Services](#services)
+- [Prerequisites](#prerequisites)
+- [Installing Docker on Windows (license-free)](#installing-docker-on-windows-license-free)
+- [Managing the stack](#managing-the-stack)
+- [Quick start](#quick-start)
+- [`.env` reference](#env-reference)
+- [Connection strings](#connection-strings)
+- [Customising Service Bus queues and topics](#customising-service-bus-queues-and-topics)
+- [Service Bus Monitor](#service-bus-monitor)
+- [Troubleshooting](#troubleshooting)
+- [File structure](#file-structure)
 
 ---
 
@@ -20,6 +36,7 @@ A local Docker-based infrastructure stack for .NET development and testing. Runs
 
 - A license-free Docker-compatible runtime (see [Installing Docker on Windows](#installing-docker-on-windows-license-free) below, or use Docker Engine on Linux)
 - `docker compose` CLI (v2+)
+- [PowerShell 7.0+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) (required by `stack.ps1`; optional if using `docker compose` directly)
 
 ---
 
@@ -68,6 +85,7 @@ the appropriate `docker compose` commands, and verifies the outcome after each a
 | `logs` | Stream live logs from all services (Ctrl+C to stop) |
 | `logs <service>` | Stream logs from one service (`mssql`, `postgres`, `servicebus`, `servicebus-sql`) |
 | `pull` | Pull the latest images without starting the stack |
+| `monitor` | Launch the interactive Service Bus message monitor TUI (see [Service Bus Monitor](#service-bus-monitor)) |
 
 Running `.\stack.ps1` with no arguments prints the usage summary.
 
@@ -197,6 +215,39 @@ Restart the `servicebus` container after editing the config file.
 
 ---
 
+## Service Bus Monitor
+
+The repository includes an interactive terminal-based (TUI) message monitor for the Azure Service Bus Emulator, built with .NET 8 and C#. It lets you peek at messages flowing through your topics and subscriptions in real time — useful for debugging and verifying message-driven workflows during local development.
+
+### Launching the monitor
+
+The easiest way to start the monitor is through the stack manager:
+
+```powershell
+.\stack.ps1 monitor
+```
+
+This automatically builds the .NET project (if needed) and launches the interactive TUI.
+
+Alternatively, build and run it directly:
+
+```bash
+cd servicebus/monitor
+dotnet build
+dotnet run
+```
+
+### How it works
+
+- **Auto-discovers** topics and subscriptions from `servicebus/Config.json`.
+- **Peeks** messages without consuming them, so your application's subscribers are unaffected.
+- Uses a dedicated `monitor` subscription on each topic (see [Customising Service Bus queues and topics](#customising-service-bus-queues-and-topics)).
+- Provides keyboard navigation to browse messages across topics.
+- Retries with exponential backoff if the Service Bus emulator is not yet available.
+- Caps in-memory message storage at 1,000 messages to prevent memory exhaustion.
+
+---
+
 ## Troubleshooting
 
 ### Containers show as unhealthy
@@ -289,10 +340,12 @@ If your application can't connect:
 .
 ├── .env.example              # Safe-to-commit template — copy to .env and fill in secrets
 ├── .gitignore                # Ensures .env and Config.json are never committed
-├── docker-compose.yml        # All service definitions
-├── stack.ps1                 # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull)
-├── servicebus/
-│   ├── Config.example.json   # Safe-to-commit template — copy to Config.json and customise
-│   └── monitor/              # Interactive Service Bus message monitor (.NET 8 TUI)
-└── README.md
+├── docker-compose.yml        # All service definitions with health checks
+├── stack.ps1                 # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
+├── README.md                 # This documentation
+└── servicebus/
+    ├── Config.example.json   # Safe-to-commit template — copy to Config.json and customise
+    └── monitor/
+        ├── Program.cs                # Interactive Service Bus message monitor (.NET 8 TUI)
+        └── ServiceBusMonitor.csproj  # .NET 8 project file
 ```
