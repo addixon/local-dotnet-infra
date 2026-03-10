@@ -51,6 +51,11 @@ internal static class Program
     static bool _needsRedraw = true;
     static readonly CancellationTokenSource _cts = new();
 
+    // Dynamic subscription tracking
+    const int ConfigPollIntervalMs = 5000;
+    static readonly ConcurrentDictionary<(string Topic, string Subscription), bool> _activeEndpoints = new();
+    static readonly ConcurrentDictionary<string, bool> _activeTopics = new();
+
     // ── ANSI helpers (mirrors stack.ps1 style) ───────────────────────────────
 
     static string C(string code, string text) => $"\x1b[{code}m{text}\x1b[0m";
@@ -78,40 +83,6 @@ internal static class Program
             return 1;
         }
 
-        // Parse config
-        var config = JsonSerializer.Deserialize<SbEmulatorConfig>(
-            File.ReadAllText(configPath));
-
-        var namespaces = config?.UserConfig?.Namespaces ?? [];
-        if (namespaces.Count == 0)
-        {
-            Console.Error.WriteLine("No namespaces found in config.");
-            return 1;
-        }
-
-        // Flatten all namespaces → topics → subscriptions
-        var endpoints = new List<(string Topic, string Subscription)>();
-        var allTopics = new List<string>();
-
-        foreach (var ns in namespaces)
-        {
-            var topics = ns.Topics ?? [];
-            foreach (var topic in topics)
-            {
-                if (!allTopics.Contains(topic.Name))
-                    allTopics.Add(topic.Name);
-
-                foreach (var sub in topic.Subscriptions ?? [])
-                    endpoints.Add((topic.Name, sub.Name));
-            }
-        }
-
-        if (endpoints.Count == 0)
-        {
-            Console.Error.WriteLine("No subscriptions configured under any topic.");
-            return 1;
-        }
-
         // Well-known connection string for the Azure Service Bus Emulator.
         // "SAS_KEY_VALUE" is the default placeholder accepted by the emulator;
         // it does not represent a real secret.
@@ -123,6 +94,9 @@ internal static class Program
 
         await using var client = new ServiceBusClient(connectionString);
 
+        // Load initial subscriptions from config (may be empty)
+        LoadEndpointsFromConfig(configPath, client, _cts.Token);
+
         // Setup console
         Console.CursorVisible = false;
         Console.Clear();
@@ -132,16 +106,12 @@ internal static class Program
             _cts.Cancel();
         };
 
-        // Start one polling task per subscription
-        var pollingTasks = endpoints
-            .Select(ep => PollMessagesAsync(client, ep.Topic, ep.Subscription, _cts.Token))
-            .ToArray();
-
-        var topicNames = string.Join(", ", allTopics);
+        // Watch config for new subscriptions
+        _ = WatchConfigAsync(configPath, client, _cts.Token);
 
         try
         {
-            await RunUiLoopAsync(allTopics.Count, endpoints.Count, topicNames);
+            await RunUiLoopAsync();
         }
         catch (OperationCanceledException) { /* normal exit */ }
         finally
@@ -151,6 +121,53 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    // ── Config loading & watching ────────────────────────────────────────────
+
+    static void LoadEndpointsFromConfig(string configPath, ServiceBusClient client, CancellationToken ct)
+    {
+        SbEmulatorConfig? config;
+        try
+        {
+            config = JsonSerializer.Deserialize<SbEmulatorConfig>(
+                File.ReadAllText(configPath));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[monitor] Failed to read config {configPath}: {ex.Message}");
+            return;
+        }
+
+        var namespaces = config?.UserConfig?.Namespaces ?? [];
+
+        foreach (var ns in namespaces)
+        {
+            foreach (var topic in ns.Topics ?? [])
+            {
+                _activeTopics.TryAdd(topic.Name, true);
+
+                foreach (var sub in topic.Subscriptions ?? [])
+                {
+                    var key = (topic.Name, sub.Name);
+                    if (_activeEndpoints.TryAdd(key, true))
+                    {
+                        _ = PollMessagesAsync(client, topic.Name, sub.Name, ct);
+                    }
+                }
+            }
+        }
+    }
+
+    static async Task WatchConfigAsync(string configPath, ServiceBusClient client, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(ConfigPollIntervalMs, ct); }
+            catch (OperationCanceledException) { break; }
+
+            LoadEndpointsFromConfig(configPath, client, ct);
+        }
     }
 
     // ── Message polling ──────────────────────────────────────────────────────
@@ -237,7 +254,7 @@ internal static class Program
 
     // ── UI loop ──────────────────────────────────────────────────────────────
 
-    static async Task RunUiLoopAsync(int topicCount, int subscriptionCount, string topicNames)
+    static async Task RunUiLoopAsync()
     {
         while (!_cts.Token.IsCancellationRequested)
         {
@@ -266,7 +283,12 @@ internal static class Program
                 if (_showingDetail)
                     RenderDetail();
                 else
+                {
+                    var topicCount = _activeTopics.Count;
+                    var subscriptionCount = _activeEndpoints.Count;
+                    var topicNames = string.Join(", ", _activeTopics.Keys.OrderBy(t => t));
                     RenderList(topicCount, subscriptionCount, topicNames);
+                }
                 _needsRedraw = false;
             }
 
@@ -338,8 +360,16 @@ internal static class Program
         sb.AppendLine();
 
         // Info
-        sb.AppendLine($"  {BCyan("▶")} Monitoring {Bold(topicCount.ToString())} topic(s) across {Bold(subscriptionCount.ToString())} subscription(s)");
-        sb.AppendLine($"    {Dim($"Topics: {topicNames}")}");
+        if (subscriptionCount == 0)
+        {
+            sb.AppendLine($"  {BCyan("▶")} Waiting for subscriptions to appear in config…");
+            sb.AppendLine($"    {Dim($"The config file is checked every {ConfigPollIntervalMs / 1000} seconds.")}");
+        }
+        else
+        {
+            sb.AppendLine($"  {BCyan("▶")} Monitoring {Bold(topicCount.ToString())} topic(s) across {Bold(subscriptionCount.ToString())} subscription(s)");
+            sb.AppendLine($"    {Dim($"Topics: {topicNames}")}");
+        }
         sb.AppendLine();
         sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Enter to view · Ctrl+C to stop")}");
         sb.AppendLine();
