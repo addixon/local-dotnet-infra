@@ -51,9 +51,9 @@ internal static class Program
     static bool _needsRedraw = true;
     static readonly CancellationTokenSource _cts = new();
 
-    // Dynamic subscription tracking
+    // Dynamic subscription tracking — only the well-known "monitor" subscription is used
+    const string MonitorSubscriptionName = "monitor";
     const int ConfigPollIntervalMs = 5000;
-    static readonly ConcurrentDictionary<(string Topic, string Subscription), bool> _activeEndpoints = new();
     static readonly ConcurrentDictionary<string, bool> _activeTopics = new();
 
     // ── ANSI helpers (mirrors stack.ps1 style) ───────────────────────────────
@@ -145,16 +145,11 @@ internal static class Program
         {
             foreach (var topic in ns.Topics ?? [])
             {
-                _activeTopics.TryAdd(topic.Name, true);
-
-                foreach (var sub in topic.Subscriptions ?? [])
+                // Use the well-known "monitor" subscription for conflict-free monitoring
+                if (_activeTopics.TryAdd(topic.Name, true))
                 {
-                    var key = (topic.Name, sub.Name);
-                    if (_activeEndpoints.TryAdd(key, true))
-                    {
-                        _needsRedraw = true;
-                        _ = PollMessagesAsync(client, topic.Name, sub.Name, ct);
-                    }
+                    _needsRedraw = true;
+                    _ = PollMessagesAsync(client, topic.Name, MonitorSubscriptionName, ct);
                 }
             }
         }
@@ -286,9 +281,8 @@ internal static class Program
                 else
                 {
                     var topicCount = _activeTopics.Count;
-                    var subscriptionCount = _activeEndpoints.Count;
                     var topicNames = string.Join(", ", _activeTopics.Keys.OrderBy(t => t));
-                    RenderList(topicCount, subscriptionCount, topicNames);
+                    RenderList(topicCount, topicNames);
                 }
                 _needsRedraw = false;
             }
@@ -353,7 +347,7 @@ internal static class Program
 
     // ── List view ────────────────────────────────────────────────────────────
 
-    static void RenderList(int topicCount, int subscriptionCount, string topicNames)
+    static void RenderList(int topicCount, string topicNames)
     {
         var sb = new StringBuilder();
         var width  = Math.Max(SafeWindowWidth(), 80);
@@ -370,14 +364,14 @@ internal static class Program
         sb.AppendLine();
 
         // Info
-        if (subscriptionCount == 0)
+        if (topicCount == 0)
         {
-            sb.AppendLine($"  {BCyan("▶")} Waiting for subscriptions to appear in config…");
+            sb.AppendLine($"  {BCyan("▶")} Waiting for topics to appear in config…");
             sb.AppendLine($"    {Dim($"The config file is checked every {ConfigPollIntervalMs / 1000} seconds.")}");
         }
         else
         {
-            sb.AppendLine($"  {BCyan("▶")} Monitoring {Bold(topicCount.ToString())} topic(s) across {Bold(subscriptionCount.ToString())} subscription(s)");
+            sb.AppendLine($"  {BCyan("▶")} Monitoring {Bold(topicCount.ToString())} topic(s) via {Bold($"'{MonitorSubscriptionName}'")} subscriptions");
             sb.AppendLine($"    {Dim($"Topics: {topicNames}")}");
         }
         sb.AppendLine();
