@@ -59,10 +59,10 @@ $Script:Timeout     = 180   # seconds before health-wait gives up
 #            relying on Docker's built-in HEALTHCHECK (needed when the container image
 #            has no shell, e.g. the Service Bus emulator).
 $Script:ServiceDefs = @(
-    [PSCustomObject]@{ Name = 'mssql';         Container = 'local-mssql';         HasHealth = $true;  HealthUrl = $null }
-    [PSCustomObject]@{ Name = 'postgres';       Container = 'local-postgres';       HasHealth = $true;  HealthUrl = $null }
-    [PSCustomObject]@{ Name = 'servicebus-sql'; Container = 'local-servicebus-sql'; HasHealth = $true;  HealthUrl = $null }
-    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $false; HealthUrl = 'http://localhost:{0}/health'; HealthPort = 5300 }
+    [PSCustomObject]@{ Name = 'mssql';         Container = 'local-mssql';         HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
+    [PSCustomObject]@{ Name = 'postgres';       Container = 'local-postgres';       HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
+    [PSCustomObject]@{ Name = 'servicebus-sql'; Container = 'local-servicebus-sql'; HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
+    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $false; HealthUrl = 'http://localhost:{0}/health'; HealthPort = 5300; InitialDelay = 10 }
 )
 
 # ─── Terminal colour helpers ───────────────────────────────────────────────────
@@ -184,18 +184,29 @@ function Wait-AllHealthy {
       • Containers WITH  a Docker health check     → 'healthy'
       • Containers WITH  a HealthUrl (external)     → HTTP 2xx from the host
       • Containers WITHOUT either                   → 'running'
+    Services with an InitialDelay are treated as pending (without probing)
+    until the delay has elapsed, avoiding unnecessary health-check traffic
+    while the service is still initialising.
     Returns $true on full success, $false on failure or timeout.
     #>
-    $deadline      = (Get-Date).AddSeconds($Script:Timeout)
+    $startTime     = Get-Date
+    $deadline      = $startTime.AddSeconds($Script:Timeout)
     $Script:SpinIdx = 0
 
     Write-Host ''
 
     while ((Get-Date) -lt $deadline) {
+        $elapsed = ((Get-Date) - $startTime).TotalSeconds
         $pending = [System.Collections.Generic.List[string]]::new()
         $failed  = [System.Collections.Generic.List[string]]::new()
 
         foreach ($def in $Script:ServiceDefs) {
+            # Skip probing services whose initial delay has not yet elapsed
+            if ($def.InitialDelay -gt 0 -and $elapsed -lt $def.InitialDelay) {
+                $pending.Add($def.Name)
+                continue
+            }
+
             $st = Get-CStatus $def.Container
 
             if ($st -eq 'exited' -or $st -eq 'dead') {
