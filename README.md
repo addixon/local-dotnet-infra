@@ -36,7 +36,7 @@ A Docker-based local development stack providing **MS SQL Server 2025**, **Postg
 
 - A license-free Docker-compatible runtime (see [Installing Docker on Windows](#installing-docker-on-windows-license-free) below, or use Docker Engine on Linux)
 - `docker compose` CLI (v2+)
-- [PowerShell 7.0+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) (required by `stack.ps1`; optional if using `docker compose` directly)
+- [PowerShell 5.1+](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) (required by `stack.ps1`; optional if using `docker compose` directly)
 
 ---
 

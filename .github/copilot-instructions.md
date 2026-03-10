@@ -12,7 +12,7 @@
 | Container runtime | Docker Engine, Rancher Desktop, or Podman (all license-free) |
 | Relational databases | MS SQL Server 2025 Developer Edition, PostgreSQL 16 (Alpine) |
 | Message broker | Azure Service Bus Emulator (AMQP on port 5672, management on 5300) |
-| Stack management script | PowerShell 7.0+ (`stack.ps1`) |
+| Stack management script | PowerShell 5.1+ (`stack.ps1`) |
 | Service Bus monitor tool | C# / .NET 8.0 (`servicebus/monitor/Program.cs`) |
 | Configuration | Environment variables via `.env` file, JSON for Service Bus entities (`Config.example.json` → `Config.json`) |
 
@@ -47,7 +47,7 @@ All services use `restart: unless-stopped`, named volumes for persistence, and p
 
 ### PowerShell (`stack.ps1`)
 
-- Target **PowerShell 7.0+** (`#Requires -Version 7.0`).
+- Target **PowerShell 5.1+** (`#Requires -Version 5.1`). Avoid syntax only available in PowerShell 7+ (e.g. ternary operators, null-coalescing, pipeline chain operators, multi-argument `Join-Path`).
 - Enable strict mode: `Set-StrictMode -Version Latest` and `$ErrorActionPreference = 'Stop'`.
 - Use ANSI colour output with automatic fallback for non-ANSI terminals.
 - Use Unicode box-drawing characters (`╭╮╰╯│─`) and status symbols (`✓ ✗ ⚠ ▶`) for rich TUI output.
@@ -155,7 +155,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 1. **Health checks are critical** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 (no in-container healthcheck) so `stack.ps1` and `depends_on` conditions work correctly.
 2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
-3. **Test on PowerShell 7.0+** — the management script requires it.
+3. **Test on PowerShell 5.1+** — the management script targets PowerShell 5.1 for broad compatibility; do not introduce PowerShell 7+-only syntax.
 4. **Maintain the TUI styling** — both `stack.ps1` and `Program.cs` share a consistent ANSI/Unicode visual style; keep it consistent when modifying either.
 5. **Service Bus emulator depends on its internal SQL Server** — changes to `servicebus-sql` can break `servicebus`.
 6. **Volumes preserve data across restarts** — only `nuke` destroys volumes.

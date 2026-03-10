@@ -1,4 +1,4 @@
-﻿#Requires -Version 7.0
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Manage the local Docker infrastructure stack.
@@ -51,7 +51,7 @@ $ErrorActionPreference = 'Stop'
 
 $Script:ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $Script:EnvFile     = Join-Path $PSScriptRoot '.env'
-$Script:ConfigFile  = Join-Path $PSScriptRoot 'servicebus' 'Config.json'
+$Script:ConfigFile  = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'Config.json'
 $Script:Timeout     = 180   # seconds before health-wait gives up
 
 # Services in start-up dependency order, with container names and health-check style.
@@ -70,7 +70,11 @@ $Script:ServiceDefs = @(
 $ESC = [char]27
 
 # Detect ANSI support: Windows Terminal, VS Code terminal, modern consoles
-$Script:UseAnsi = $Host.UI.SupportsVirtualTerminal -or
+# $Host.UI.SupportsVirtualTerminal is only available in PowerShell 7+; treat
+# its absence as $false so the script works on 5.1 as well.
+$Script:UseAnsi = $false
+try { $Script:UseAnsi = [bool]$Host.UI.SupportsVirtualTerminal } catch { }
+$Script:UseAnsi = $Script:UseAnsi -or
                   ($env:WT_SESSION -ne $null -and $env:WT_SESSION -ne '') -or
                   ($env:TERM_PROGRAM -eq 'vscode') -or
                   ($env:TERM -match 'xterm|vt100|ansi')
@@ -546,7 +550,7 @@ function Invoke-Monitor {
         Write-Host ''
     }
 
-    $monitorProject = Join-Path $PSScriptRoot 'servicebus' 'monitor'
+    $monitorProject = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'monitor'
 
     Write-Step 'Building monitor tool (first run may take a moment)…'
     $buildOutput = & dotnet build $monitorProject -c Release --nologo -v quiet 2>&1
