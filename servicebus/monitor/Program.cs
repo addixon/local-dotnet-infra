@@ -43,6 +43,7 @@ internal static class Program
 
     static readonly ConcurrentQueue<MonitoredMessage> _incoming = new();
     static readonly List<MonitoredMessage> _messages = new();
+    const int MaxMessageCount = 1000; // Cap to prevent memory exhaustion
     static int _selectedIndex;
     static int _scrollOffset;
     static bool _showingDetail;
@@ -81,25 +82,29 @@ internal static class Program
         var config = JsonSerializer.Deserialize<SbEmulatorConfig>(
             File.ReadAllText(configPath));
 
-        var ns = config?.UserConfig?.Namespaces?.FirstOrDefault();
-        if (ns is null)
+        var namespaces = config?.UserConfig?.Namespaces ?? [];
+        if (namespaces.Count == 0)
         {
             Console.Error.WriteLine("No namespaces found in config.");
             return 1;
         }
 
-        var topics = ns.Topics ?? [];
-        if (topics.Count == 0)
-        {
-            Console.Error.WriteLine("No topics configured.");
-            return 1;
-        }
-
-        // Flatten topics → subscriptions
+        // Flatten all namespaces → topics → subscriptions
         var endpoints = new List<(string Topic, string Subscription)>();
-        foreach (var topic in topics)
-            foreach (var sub in topic.Subscriptions ?? [])
-                endpoints.Add((topic.Name, sub.Name));
+        var allTopics = new List<string>();
+
+        foreach (var ns in namespaces)
+        {
+            var topics = ns.Topics ?? [];
+            foreach (var topic in topics)
+            {
+                if (!allTopics.Contains(topic.Name))
+                    allTopics.Add(topic.Name);
+
+                foreach (var sub in topic.Subscriptions ?? [])
+                    endpoints.Add((topic.Name, sub.Name));
+            }
+        }
 
         if (endpoints.Count == 0)
         {
@@ -132,11 +137,11 @@ internal static class Program
             .Select(ep => PollMessagesAsync(client, ep.Topic, ep.Subscription, _cts.Token))
             .ToArray();
 
-        var topicNames = string.Join(", ", topics.Select(t => t.Name));
+        var topicNames = string.Join(", ", allTopics);
 
         try
         {
-            await RunUiLoopAsync(topics.Count, endpoints.Count, topicNames);
+            await RunUiLoopAsync(allTopics.Count, endpoints.Count, topicNames);
         }
         catch (OperationCanceledException) { /* normal exit */ }
         finally
@@ -160,53 +165,73 @@ internal static class Program
             new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.PeekLock });
 
         long lastSeq = 0;
+        int retryDelay = 1000;
+        const int maxRetryDelay = 30000;
 
-        while (!ct.IsCancellationRequested)
+        try
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                var batch = await receiver.PeekMessagesAsync(
-                    maxMessages: 50,
-                    fromSequenceNumber: lastSeq + 1,
-                    cancellationToken: ct);
-
-                foreach (var msg in batch)
+                try
                 {
-                    if (msg.SequenceNumber <= lastSeq) continue;
-                    lastSeq = msg.SequenceNumber;
+                    var batch = await receiver.PeekMessagesAsync(
+                        maxMessages: 50,
+                        fromSequenceNumber: lastSeq + 1,
+                        cancellationToken: ct);
 
-                    string body;
-                    try { body = msg.Body.ToString(); }
-                    catch { body = "(unable to read body)"; }
+                    // Reset retry delay on success
+                    retryDelay = 1000;
 
-                    var props = new Dictionary<string, object>();
-                    foreach (var kvp in msg.ApplicationProperties)
-                        props[kvp.Key] = kvp.Value;
+                    foreach (var msg in batch)
+                    {
+                        if (msg.SequenceNumber <= lastSeq) continue;
+                        lastSeq = msg.SequenceNumber;
 
-                    _incoming.Enqueue(new MonitoredMessage(
-                        msg.MessageId,
-                        topicName,
-                        subscriptionName,
-                        msg.EnqueuedTime,
-                        msg.Subject,
-                        props,
-                        body,
-                        msg.SequenceNumber));
+                        string body;
+                        try { body = msg.Body.ToString(); }
+                        catch { body = "(unable to read body)"; }
+
+                        var props = new Dictionary<string, object>();
+                        foreach (var kvp in msg.ApplicationProperties)
+                            props[kvp.Key] = kvp.Value;
+
+                        _incoming.Enqueue(new MonitoredMessage(
+                            msg.MessageId,
+                            topicName,
+                            subscriptionName,
+                            msg.EnqueuedTime,
+                            msg.Subject,
+                            props,
+                            body,
+                            msg.SequenceNumber));
+                    }
                 }
-            }
-            catch (OperationCanceledException) { break; }
-            catch (ServiceBusException)
-            {
-                // Transient Service Bus errors (e.g. connection lost) — retry after delay
-            }
-            catch (Exception ex)
-            {
-                // Unexpected error — surface once via stderr, then continue polling
-                Console.Error.WriteLine($"[monitor] Error polling {topicName}/{subscriptionName}: {ex.Message}");
-            }
+                catch (OperationCanceledException) { break; }
+                catch (ServiceBusException ex)
+                {
+                    // Log Service Bus errors (e.g. connection lost, unauthorized) and back off
+                    Console.Error.WriteLine($"[monitor] Service Bus error on {topicName}/{subscriptionName}: {ex.Message} (retrying in {retryDelay / 1000}s)");
 
-            try { await Task.Delay(1000, ct); }
-            catch (OperationCanceledException) { break; }
+                    try { await Task.Delay(retryDelay, ct); }
+                    catch (OperationCanceledException) { break; }
+
+                    // Exponential backoff with cap
+                    retryDelay = Math.Min(retryDelay * 2, maxRetryDelay);
+                    continue;
+                }
+                catch (Exception ex)
+                {
+                    // Unexpected error — surface once via stderr, then continue polling
+                    Console.Error.WriteLine($"[monitor] Error polling {topicName}/{subscriptionName}: {ex.Message}");
+                }
+
+                try { await Task.Delay(1000, ct); }
+                catch (OperationCanceledException) { break; }
+            }
+        }
+        finally
+        {
+            await receiver.DisposeAsync();
         }
     }
 
@@ -220,6 +245,11 @@ internal static class Program
             while (_incoming.TryDequeue(out var msg))
             {
                 _messages.Insert(0, msg); // newest first
+
+                // Cap list size to prevent memory exhaustion
+                if (_messages.Count > MaxMessageCount)
+                    _messages.RemoveAt(_messages.Count - 1);
+
                 _needsRedraw = true;
             }
 
