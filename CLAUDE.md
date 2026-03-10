@@ -11,12 +11,12 @@ Repository: `https://github.com/addixon/local-infrastructure`
 ```
 .
 ├── .env.example             # Template — copy to .env and set passwords
-├── .gitignore               # Excludes .env, build artifacts, OS files
-├── docker-compose.yml       # Docker Compose service definitions with health checks
+├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
+├── docker-compose.yml       # Docker Compose service definitions with health checks (servicebus monitored externally)
 ├── stack.ps1                # PowerShell 7.0+ stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Full user documentation
 └── servicebus/
-    ├── Config.json           # Azure Service Bus emulator entity config (queues, topics, subscriptions)
+    ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
     └── monitor/
         ├── Program.cs        # Interactive TUI for monitoring Service Bus messages (.NET 8 / C#)
         └── ServiceBusMonitor.csproj  # .NET 8 project file
@@ -39,7 +39,7 @@ Four containers run in the stack:
 1. **`local-mssql`** — MS SQL Server 2025 Developer on port 1433. Health checked with `sqlcmd`.
 2. **`local-postgres`** — PostgreSQL 16 Alpine on port 5432. Health checked with `pg_isready`.
 3. **`local-servicebus-sql`** — Internal SQL Server for the Service Bus emulator (no exposed port). Health checked with `sqlcmd`.
-4. **`local-servicebus`** — Azure Service Bus Emulator on ports 5672 (AMQP) and 5300 (management/health). Health checked with HTTP GET to `/health`. Depends on `servicebus-sql` being healthy.
+4. **`local-servicebus`** — Azure Service Bus Emulator on ports 5672 (AMQP) and 5300 (management/health). Health is probed from the host by stack.ps1 via HTTP GET to `/health` (the container image has no shell for Docker healthchecks). Depends on `servicebus-sql` being healthy.
 
 All services use `restart: unless-stopped` and named Docker volumes for data persistence.
 
@@ -135,9 +135,10 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 - Secrets come from `.env` via environment variable substitution with defaults: `${VAR:-default}`.
 - Named volumes for any persistent data. Comment headers for each service section.
 
-### JSON (`servicebus/Config.json`)
+### JSON (`servicebus/Config.example.json`)
 
 - 2-space indentation. Follows the Azure Service Bus Emulator configuration schema.
+- `Config.example.json` is the safe-to-commit template; `Config.json` is the user's local copy (git-ignored).
 
 ### General Patterns
 
@@ -148,8 +149,8 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ## Important Rules
 
-1. **Health checks are essential** — every Docker service must have one. `stack.ps1` and `depends_on` conditions rely on them.
-2. **Never commit `.env`** — it contains secrets and is git-ignored.
+1. **Health checks are essential** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 because its image lacks a shell. `stack.ps1` and `depends_on` conditions rely on them.
+2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **Password complexity** — SQL Server passwords must meet: min 8 characters, mixed case, at least one digit, at least one special character.
 4. **Service Bus depends on its internal SQL Server** — `servicebus` starts only after `servicebus-sql` is healthy.
 5. **Maintain TUI consistency** — `stack.ps1` and `Program.cs` share a visual style; preserve it in any changes.
@@ -157,7 +158,7 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 7. **No CI/CD pipelines** — this is an infrastructure-only repository with no automated test suite.
 8. **No test infrastructure** — there are no unit or integration tests to run.
 9. **PowerShell 7.0+ only** — do not use features removed in PowerShell 7 or syntax incompatible with it.
-10. **Keep `.env.example` in sync** — if you add new environment variables to `docker-compose.yml`, add them to `.env.example` with placeholder values and document them in `README.md`.
+10. **Keep `.env.example` and `Config.example.json` in sync** — if you add new environment variables to `docker-compose.yml`, add them to `.env.example` with placeholder values and document them in `README.md`. Changes to Service Bus entities should be reflected in `Config.example.json`.
 
 ## Troubleshooting
 

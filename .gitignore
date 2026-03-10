@@ -8,6 +8,9 @@ Thumbs.db
 
 .vs
 
+# Service Bus emulator config — copy Config.example.json to Config.json
+servicebus/Config.json
+
 # .NET build artifacts (servicebus monitor tool)
 servicebus/monitor/bin/
 servicebus/monitor/obj/

@@ -16,19 +16,19 @@ Repository: `https://github.com/addixon/local-infrastructure`
 | Message broker | Azure Service Bus Emulator (AMQP on port 5672, management on 5300) |
 | Stack management script | PowerShell 7.0+ (`stack.ps1`) |
 | Service Bus monitor tool | C# / .NET 8.0 (`servicebus/monitor/Program.cs`) |
-| Configuration | Environment variables via `.env` file, JSON for Service Bus entities |
+| Configuration | Environment variables via `.env` file, JSON for Service Bus entities (`Config.example.json` → `Config.json`) |
 
 ## File Structure
 
 ```
 .
 ├── .env.example             # Template — copy to .env and set real passwords
-├── .gitignore               # Excludes .env, build artifacts, OS files
-├── docker-compose.yml       # All service definitions with health checks
+├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
+├── docker-compose.yml       # All service definitions with health checks (servicebus monitored externally)
 ├── stack.ps1                # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Comprehensive user documentation
 └── servicebus/
-    ├── Config.json           # Service Bus emulator namespace, queue, and topic definitions
+    ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
     └── monitor/
         ├── Program.cs        # Interactive TUI Service Bus message monitor (.NET 8)
         └── ServiceBusMonitor.csproj  # .NET project file (targets net8.0)
@@ -41,7 +41,7 @@ Repository: `https://github.com/addixon/local-infrastructure`
 | MS SQL Server 2025 | `local-mssql` | `mcr.microsoft.com/mssql/server:2025-latest` | 1433 | `sqlcmd SELECT 1` (15 s interval) |
 | PostgreSQL 16 | `local-postgres` | `postgres:16-alpine` | 5432 | `pg_isready` (10 s interval) |
 | Service Bus SQL (internal) | `local-servicebus-sql` | `mcr.microsoft.com/mssql/server:2025-latest` | none (internal) | `sqlcmd SELECT 1` (15 s interval) |
-| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | HTTP GET `/health` (10 s interval) |
+| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | Host-side HTTP GET `/health` via stack.ps1 (container has no shell) |
 
 All services use `restart: unless-stopped`, named volumes for persistence, and proper `depends_on` with health conditions.
 
@@ -68,16 +68,17 @@ All services use `restart: unless-stopped`, named volumes for persistence, and p
 
 ### Docker Compose (`docker-compose.yml`)
 
-- Every service must include a `healthcheck` block.
+- All services are health-checked; `servicebus` is probed from the host via stack.ps1 because its image lacks a shell (no Docker `healthcheck` block).
 - Use environment variable substitution with defaults: `${VAR:-default}`.
 - All secrets must come from the `.env` file — never hard-code passwords.
 - Define named volumes for any persistent data.
 - Add descriptive comment headers for each service section.
 
-### JSON Configuration (`servicebus/Config.json`)
+### JSON Configuration (`servicebus/Config.example.json`)
 
 - Clean, well-indented formatting (2-space indent).
 - Follow the Azure Service Bus Emulator schema for namespaces, queues, topics, and subscriptions.
+- `Config.example.json` is the safe-to-commit template; `Config.json` is the user's local copy (git-ignored).
 
 ### General
 
@@ -124,6 +125,7 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ```powershell
 cp .env.example .env          # create secrets file and fill in real values
+cp servicebus/Config.example.json servicebus/Config.json  # create Service Bus config
 .\stack.ps1 start             # start all services and wait for healthy
 .\stack.ps1 status            # verify health of every container
 .\stack.ps1 logs              # stream live logs
@@ -149,15 +151,16 @@ dotnet build
 dotnet run
 ```
 
-The monitor auto-discovers topics and subscriptions from `servicebus/Config.json` and peeks messages in real time with an interactive TUI.
+The monitor auto-discovers topics and subscriptions from `servicebus/Config.json` (copied from `Config.example.json`) and peeks messages in real time with an interactive TUI.
 
 ## Key Guidelines for Changes
 
-1. **Health checks are critical** — every Docker service must have a working health check so `stack.ps1` and `depends_on` conditions work correctly.
-2. **Never commit `.env`** — it contains secrets and is git-ignored.
+1. **Health checks are critical** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 (no in-container healthcheck) so `stack.ps1` and `depends_on` conditions work correctly.
+2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **Test on PowerShell 7.0+** — the management script requires it.
 4. **Maintain the TUI styling** — both `stack.ps1` and `Program.cs` share a consistent ANSI/Unicode visual style; keep it consistent when modifying either.
 5. **Service Bus emulator depends on its internal SQL Server** — changes to `servicebus-sql` can break `servicebus`.
 6. **Volumes preserve data across restarts** — only `nuke` destroys volumes.
 7. **No CI/CD pipelines exist** — this is an infrastructure-only repository.
 8. **Password complexity** — SQL Server passwords must meet complexity rules (min 8 chars, mixed case, digit, special char).
+9. **Keep `Config.example.json` updated** — changes to Service Bus entity definitions should be reflected in the example file.
