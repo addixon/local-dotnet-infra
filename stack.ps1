@@ -58,7 +58,7 @@ $Script:ServiceDefs = @(
     [PSCustomObject]@{ Name = 'mssql';         Container = 'local-mssql';         HasHealth = $true  }
     [PSCustomObject]@{ Name = 'postgres';       Container = 'local-postgres';       HasHealth = $true  }
     [PSCustomObject]@{ Name = 'servicebus-sql'; Container = 'local-servicebus-sql'; HasHealth = $true  }
-    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $false }
+    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $true  }
 )
 
 # ─── Terminal colour helpers ───────────────────────────────────────────────────
@@ -457,13 +457,23 @@ function Invoke-Monitor {
         exit 1
     }
 
-    # Ensure the service bus emulator is running
+    # Ensure the stack (and Service Bus emulator) is running and healthy
     $sbStatus = Get-CStatus 'local-servicebus'
-    if ($sbStatus -ne 'running') {
-        Write-Fail 'Service Bus emulator is not running.'
-        Write-Host "    Start the stack first: $(Cyan '.\stack.ps1 start')"
+    $sbHealth = Get-CHealth 'local-servicebus'
+    if ($sbStatus -ne 'running' -or $sbHealth -ne 'healthy') {
+        Write-Step 'Service Bus emulator is not running – starting the stack…'
         Write-Host ''
-        exit 1
+        $rc = Invoke-Compose 'up', '-d', '--remove-orphans'
+        if ($rc -ne 0) {
+            Write-Host ''
+            Write-Fail "docker compose up failed (exit code $rc)."
+            exit 1
+        }
+        Write-Host ''
+        Write-Step 'Waiting for all services to become healthy…'
+        if (-not (Wait-AllHealthy)) { exit 1 }
+        Write-Success 'Stack is up and all services are healthy.'
+        Write-Host ''
     }
 
     $monitorProject = Join-Path $PSScriptRoot 'servicebus' 'monitor'
@@ -524,5 +534,5 @@ switch ($Action.ToLower()) {
     'status'  {                 Invoke-Status             }
     'logs'    {                 Invoke-Logs $Service      }
     'pull'    {                 Invoke-Pull               }
-    'monitor' {                 Invoke-Monitor            }
+    'monitor' { Assert-EnvFile; Invoke-Monitor            }
 }
