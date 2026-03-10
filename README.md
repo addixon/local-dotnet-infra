@@ -1,6 +1,22 @@
-# local-infrastructure
+# dotnet-local-dev-stack
 
-A local Docker-based infrastructure stack for .NET development and testing. Runs **MS SQL Server**, **PostgreSQL**, and the **Azure Service Bus Emulator** in a fully license-free environment so you can exercise complete stacks without any cloud costs or service dependencies.
+> **Repository name options** (for maintainer review when making this repo public):
+>
+> | # | Name | Rationale |
+> |---|---|---|
+> | 1 | `dotnet-local-dev-stack` | Clearly targets .NET developers, signals it is a complete local stack, and is immediately searchable |
+> | 2 | `local-dotnet-infra` | Short and searchable; pairs well with the existing file names and internal conventions |
+> | 3 | `dotnet-docker-devenv` | Emphasises both the Docker tooling and the developer-environment purpose |
+>
+> **Repository description options** (140-char GitHub limit):
+>
+> | # | Description |
+> |---|---|
+> | 1 | `License-free Docker dev stack for .NET: MS SQL Server 2025, PostgreSQL 16 & Azure Service Bus Emulator — zero cloud costs, one command to start.` |
+> | 2 | `Spin up a full .NET backend locally with Docker — MS SQL Server, PostgreSQL, and Azure Service Bus Emulator. No cloud required, no licensing fees.` |
+> | 3 | `Containerised local dev infrastructure for .NET — MS SQL Server 2025, PostgreSQL 16, Azure Service Bus Emulator, PowerShell stack manager & live monitor.` |
+
+License-free Docker stack for .NET local development — spin up **MS SQL Server 2025**, **PostgreSQL 16**, and the **Azure Service Bus Emulator** with zero cloud costs, no licensing fees, and a single PowerShell command.
 
 ---
 
