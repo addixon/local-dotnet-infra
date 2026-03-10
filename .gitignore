@@ -7,3 +7,7 @@ Thumbs.db
 *.swp
 
 .vs
+
+# .NET build artifacts (servicebus monitor tool)
+servicebus/monitor/bin/
+servicebus/monitor/obj/
