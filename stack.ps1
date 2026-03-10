@@ -53,12 +53,15 @@ $Script:ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $Script:EnvFile     = Join-Path $PSScriptRoot '.env'
 $Script:Timeout     = 180   # seconds before health-wait gives up
 
-# Services in start-up dependency order, with container names and health-check style
+# Services in start-up dependency order, with container names and health-check style.
+# HealthUrl: when set, stack.ps1 checks this HTTP endpoint from the host instead of
+#            relying on Docker's built-in HEALTHCHECK (needed when the container image
+#            has no shell, e.g. the Service Bus emulator).
 $Script:ServiceDefs = @(
-    [PSCustomObject]@{ Name = 'mssql';         Container = 'local-mssql';         HasHealth = $true  }
-    [PSCustomObject]@{ Name = 'postgres';       Container = 'local-postgres';       HasHealth = $true  }
-    [PSCustomObject]@{ Name = 'servicebus-sql'; Container = 'local-servicebus-sql'; HasHealth = $true  }
-    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $true  }
+    [PSCustomObject]@{ Name = 'mssql';         Container = 'local-mssql';         HasHealth = $true;  HealthUrl = $null }
+    [PSCustomObject]@{ Name = 'postgres';       Container = 'local-postgres';       HasHealth = $true;  HealthUrl = $null }
+    [PSCustomObject]@{ Name = 'servicebus-sql'; Container = 'local-servicebus-sql'; HasHealth = $true;  HealthUrl = $null }
+    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $false; HealthUrl = 'http://localhost:{0}/health'; HealthPort = 5300 }
 )
 
 # ─── Terminal colour helpers ───────────────────────────────────────────────────
@@ -151,13 +154,35 @@ function Get-CHealth ([string]$ContainerName) {
     return $v
 }
 
+function Get-HostPort ([string]$ContainerName, [int]$ContainerPort) {
+    $raw = docker port $ContainerName $ContainerPort 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return $null }
+    # docker port returns lines like "0.0.0.0:5300" or "[::]:5300"
+    $parts = ($raw.Trim() -split "`n")[0] -split ':'
+    return $parts[-1]
+}
+
+function Test-HealthEndpoint ([string]$Url) {
+    <#
+    Makes a lightweight HTTP GET from the host to the given URL.
+    Returns $true on a 2xx response, $false on any error.
+    #>
+    try {
+        $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 # ─── Health-polling loop ──────────────────────────────────────────────────────
 
 function Wait-AllHealthy {
     <#
     Polls each defined container until it reaches its expected state:
-      • Containers WITH  a health check → 'healthy'
-      • Containers WITHOUT a health check → 'running'
+      • Containers WITH  a Docker health check     → 'healthy'
+      • Containers WITH  a HealthUrl (external)     → HTTP 2xx from the host
+      • Containers WITHOUT either                   → 'running'
     Returns $true on full success, $false on failure or timeout.
     #>
     $deadline      = (Get-Date).AddSeconds($Script:Timeout)
@@ -183,6 +208,18 @@ function Wait-AllHealthy {
                     'healthy'   { }
                     'unhealthy' { $failed.Add($def.Name) }
                     default     { $pending.Add($def.Name) }
+                }
+            } elseif ($def.HealthUrl) {
+                # External health check — container has no shell so we probe from the host
+                if ($st -ne 'running') {
+                    $pending.Add($def.Name)
+                } else {
+                    $port = Get-HostPort $def.Container $def.HealthPort
+                    if (-not $port) { $pending.Add($def.Name); continue }
+                    $url = $def.HealthUrl -f $port
+                    if (-not (Test-HealthEndpoint $url)) {
+                        $pending.Add($def.Name)
+                    }
                 }
             } else {
                 if ($st -ne 'running') { $pending.Add($def.Name) }
@@ -234,7 +271,12 @@ function Show-Status {
     foreach ($def in $Script:ServiceDefs) {
         $st    = Get-CStatus $def.Container
         $stRaw = if ($st -eq 'absent') { 'not started' } else { $st }
-        $hlRaw = if ($def.HasHealth) { Get-CHealth $def.Container } else { '-' }
+        $hlRaw = if ($def.HasHealth) {
+            Get-CHealth $def.Container
+        } elseif ($def.HealthUrl -and $st -eq 'running') {
+            $port = Get-HostPort $def.Container $def.HealthPort
+            if ($port -and (Test-HealthEndpoint ($def.HealthUrl -f $port))) { 'healthy' } else { 'starting' }
+        } else { '-' }
         if ($hlRaw -eq 'none') { $hlRaw = '-' }
 
         $ports = ''
@@ -459,8 +501,13 @@ function Invoke-Monitor {
 
     # Ensure the stack (and Service Bus emulator) is running and healthy
     $sbStatus = Get-CStatus 'local-servicebus'
-    $sbHealth = Get-CHealth 'local-servicebus'
-    if ($sbStatus -ne 'running' -or $sbHealth -ne 'healthy') {
+    $sbDef    = $Script:ServiceDefs | Where-Object { $_.Name -eq 'servicebus' }
+    $sbReady  = $false
+    if ($sbStatus -eq 'running' -and $sbDef.HealthUrl) {
+        $port = Get-HostPort 'local-servicebus' $sbDef.HealthPort
+        if ($port) { $sbReady = Test-HealthEndpoint ($sbDef.HealthUrl -f $port) }
+    }
+    if (-not $sbReady) {
         Write-Step 'Service Bus emulator is not running – starting the stack…'
         Write-Host ''
         $rc = Invoke-Compose 'up', '-d', '--remove-orphans'

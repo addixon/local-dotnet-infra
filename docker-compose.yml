@@ -88,12 +88,9 @@ services:
     depends_on:
       servicebus-sql:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5300/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 60s
+    # NOTE: No Docker healthcheck — the emulator image (CBL-Mariner based) has no
+    # shell (/bin/sh), so CMD-SHELL health checks always fail.  Health is verified
+    # externally by stack.ps1 via the /health HTTP endpoint on the management port.
 
 volumes:
   mssql_data:
