@@ -11,7 +11,7 @@
 ├── .env.example             # Template — copy to .env and set passwords
 ├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
 ├── docker-compose.yml       # Docker Compose service definitions with health checks (servicebus monitored externally)
-├── stack.ps1                # PowerShell 7.0+ stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
+├── stack.ps1                # PowerShell 5.1+ stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Full user documentation
 └── servicebus/
     ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
@@ -26,7 +26,7 @@
 - **MS SQL Server 2025 Developer Edition** (free for dev/test)
 - **PostgreSQL 16** (Alpine variant)
 - **Azure Service Bus Emulator** with AMQP protocol
-- **PowerShell 7.0+** for the stack management script (`stack.ps1`)
+- **PowerShell 5.1+** for the stack management script (`stack.ps1`)
 - **C# / .NET 8.0** for the Service Bus monitor tool
 - **License-free runtimes**: Docker Engine, Rancher Desktop, or Podman (no Docker Desktop required)
 
@@ -110,7 +110,7 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ### PowerShell (`stack.ps1`)
 
-- Requires PowerShell 7.0+ (`#Requires -Version 7.0`).
+- Requires PowerShell 5.1+ (`#Requires -Version 5.1`).
 - Strict mode enabled: `Set-StrictMode -Version Latest`, `$ErrorActionPreference = 'Stop'`.
 - Uses ANSI colour codes with automatic fallback for terminals that do not support ANSI.
 - Rich TUI output with Unicode box-drawing characters (`╭╮╰╯│─`) and status symbols (`✓ ✗ ⚠ ▶`).
@@ -155,7 +155,7 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 6. **Volumes persist across restarts** — only `.\stack.ps1 nuke` or `docker compose down -v` removes them.
 7. **No CI/CD pipelines** — this is an infrastructure-only repository with no automated test suite.
 8. **No test infrastructure** — there are no unit or integration tests to run.
-9. **PowerShell 7.0+ only** — do not use features removed in PowerShell 7 or syntax incompatible with it.
+9. **PowerShell 5.1+ compatibility** — do not introduce syntax that requires PowerShell 7+ (e.g. ternary operators, null-coalescing, pipeline chain operators, multi-argument `Join-Path`).
 10. **Keep `.env.example` and `Config.example.json` in sync** — if you add new environment variables to `docker-compose.yml`, add them to `.env.example` with placeholder values and document them in `README.md`. Changes to Service Bus entities should be reflected in `Config.example.json`.
 
 ## Troubleshooting

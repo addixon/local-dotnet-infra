@@ -11,7 +11,7 @@
 ├── .env.example             # Template — copy to .env and set passwords
 ├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
 ├── docker-compose.yml       # Docker Compose service definitions with health checks
-├── stack.ps1                # PowerShell 7.0+ stack manager
+├── stack.ps1                # PowerShell 5.1+ stack manager
 ├── README.md                # Full user documentation
 └── servicebus/
     ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
@@ -26,7 +26,7 @@
 - **MS SQL Server 2025 Developer Edition** — relational database (port 1433)
 - **PostgreSQL 16 Alpine** — relational database (port 5432)
 - **Azure Service Bus Emulator** — message broker (AMQP port 5672, management port 5300)
-- **PowerShell 7.0+** — stack management script (`stack.ps1`)
+- **PowerShell 5.1+** — stack management script (`stack.ps1`)
 - **C# / .NET 8.0** — Service Bus monitor tool (`servicebus/monitor/`)
 - **License-free runtimes only** — Docker Engine, Rancher Desktop, or Podman
 
@@ -109,7 +109,7 @@ dotnet run
 
 ### PowerShell (`stack.ps1`)
 
-- **Version**: PowerShell 7.0+ required (`#Requires -Version 7.0`).
+- **Version**: PowerShell 5.1+ required (`#Requires -Version 5.1`). Avoid syntax only available in PowerShell 7+ (e.g. ternary operators, null-coalescing, pipeline chain operators, multi-argument `Join-Path`).
 - **Strict mode**: `Set-StrictMode -Version Latest` and `$ErrorActionPreference = 'Stop'`.
 - **Terminal output**: ANSI colour codes with automatic fallback for non-ANSI terminals.
 - **TUI elements**: Unicode box-drawing characters (`╭╮╰╯│─`) and status symbols (`✓ ✗ ⚠ ▶`).
@@ -157,7 +157,7 @@ dotnet run
 5. **Maintain TUI consistency** — `stack.ps1` and `Program.cs` share a visual style; preserve it.
 6. **Volumes persist data** — only `nuke` or `docker compose down -v` destroys volumes.
 7. **No CI/CD or test infrastructure** — this is a pure infrastructure repository.
-8. **PowerShell 7.0+ only** — do not introduce syntax incompatible with PowerShell 7.
+8. **PowerShell 5.1+ compatibility** — do not introduce syntax that requires PowerShell 7+ (e.g. ternary operators, null-coalescing, pipeline chain operators, multi-argument `Join-Path`).
 
 ## Troubleshooting
 
