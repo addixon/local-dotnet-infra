@@ -152,6 +152,7 @@ internal static class Program
                     var key = (topic.Name, sub.Name);
                     if (_activeEndpoints.TryAdd(key, true))
                     {
+                        _needsRedraw = true;
                         _ = PollMessagesAsync(client, topic.Name, sub.Name, ct);
                     }
                 }
@@ -293,7 +294,6 @@ internal static class Program
             }
 
             await Task.Delay(150, _cts.Token);
-            _needsRedraw = true; // periodic refresh for the "waiting…" animation
         }
     }
 
@@ -302,6 +302,13 @@ internal static class Program
     static void HandleKey(ConsoleKeyInfo key)
     {
         _needsRedraw = true;
+
+        // Exit on 'q' or 'Q' from any view
+        if (key.KeyChar is 'q' or 'Q')
+        {
+            _cts.Cancel();
+            return;
+        }
 
         if (_showingDetail)
         {
@@ -323,6 +330,9 @@ internal static class Program
         {
             switch (key.Key)
             {
+                case ConsoleKey.Escape:
+                    _cts.Cancel();
+                    return;
                 case ConsoleKey.UpArrow:
                     _selectedIndex = Math.Max(0, _selectedIndex - 1);
                     break;
@@ -371,7 +381,7 @@ internal static class Program
             sb.AppendLine($"    {Dim($"Topics: {topicNames}")}");
         }
         sb.AppendLine();
-        sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Enter to view · Ctrl+C to stop")}");
+        sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Enter to view · q or Esc to quit")}");
         sb.AppendLine();
 
         // Column headers
