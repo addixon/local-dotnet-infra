@@ -51,7 +51,7 @@ $ErrorActionPreference = 'Stop'
 
 $Script:ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $Script:EnvFile     = Join-Path $PSScriptRoot '.env'
-$Script:Timeout     = 120   # seconds before health-wait gives up
+$Script:Timeout     = 180   # seconds before health-wait gives up
 
 # Services in start-up dependency order, with container names and health-check style
 $Script:ServiceDefs = @(

@@ -236,7 +236,7 @@ If you see "port is already allocated" errors:
 
 ### Stack takes too long to start
 
-If `.\stack.ps1 start` times out after 120 seconds:
+If `.\stack.ps1 start` times out after 180 seconds:
 
 1. **Check Docker resources** – Ensure Docker has enough CPU and memory allocated (especially SQL Server)
 
