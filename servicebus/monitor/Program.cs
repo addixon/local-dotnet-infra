@@ -52,8 +52,9 @@ internal static class Program
     static readonly CancellationTokenSource _cts = new();
 
     // Dynamic subscription tracking
-    static readonly ConcurrentDictionary<(string Topic, string Subscription), byte> _activeEndpoints = new();
-    static readonly ConcurrentDictionary<string, byte> _activeTopics = new();
+    const int ConfigPollIntervalMs = 5000;
+    static readonly ConcurrentDictionary<(string Topic, string Subscription), bool> _activeEndpoints = new();
+    static readonly ConcurrentDictionary<string, bool> _activeTopics = new();
 
     // ── ANSI helpers (mirrors stack.ps1 style) ───────────────────────────────
 
@@ -132,7 +133,11 @@ internal static class Program
             config = JsonSerializer.Deserialize<SbEmulatorConfig>(
                 File.ReadAllText(configPath));
         }
-        catch { return; }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[monitor] Failed to read config {configPath}: {ex.Message}");
+            return;
+        }
 
         var namespaces = config?.UserConfig?.Namespaces ?? [];
 
@@ -140,12 +145,12 @@ internal static class Program
         {
             foreach (var topic in ns.Topics ?? [])
             {
-                _activeTopics.TryAdd(topic.Name, 0);
+                _activeTopics.TryAdd(topic.Name, true);
 
                 foreach (var sub in topic.Subscriptions ?? [])
                 {
                     var key = (topic.Name, sub.Name);
-                    if (_activeEndpoints.TryAdd(key, 0))
+                    if (_activeEndpoints.TryAdd(key, true))
                     {
                         _ = PollMessagesAsync(client, topic.Name, sub.Name, ct);
                     }
@@ -158,7 +163,7 @@ internal static class Program
     {
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(5000, ct); }
+            try { await Task.Delay(ConfigPollIntervalMs, ct); }
             catch (OperationCanceledException) { break; }
 
             LoadEndpointsFromConfig(configPath, client, ct);
@@ -358,7 +363,7 @@ internal static class Program
         if (subscriptionCount == 0)
         {
             sb.AppendLine($"  {BCyan("▶")} Waiting for subscriptions to appear in config…");
-            sb.AppendLine($"    {Dim("The config file is checked every 5 seconds.")}");
+            sb.AppendLine($"    {Dim($"The config file is checked every {ConfigPollIntervalMs / 1000} seconds.")}");
         }
         else
         {
