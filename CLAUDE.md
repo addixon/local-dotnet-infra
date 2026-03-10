@@ -4,8 +4,6 @@
 
 **local-infrastructure** is a Docker-based local development infrastructure stack for .NET development and testing. It provides MS SQL Server 2025 (Developer Edition), PostgreSQL 16, and the Azure Service Bus Emulator in a fully license-free containerised environment, eliminating the need for cloud costs or external service dependencies during development.
 
-Repository: `https://github.com/addixon/local-infrastructure`
-
 ## File Structure
 
 ```

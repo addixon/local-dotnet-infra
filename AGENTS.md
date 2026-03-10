@@ -4,8 +4,6 @@
 
 **local-infrastructure** is a Docker-based local development infrastructure stack for .NET development and testing. It runs MS SQL Server 2025 (Developer Edition), PostgreSQL 16, and the Azure Service Bus Emulator in a fully license-free containerised environment so developers can exercise complete application stacks without cloud costs or external service dependencies.
 
-Repository: `https://github.com/addixon/local-infrastructure`
-
 ## File Structure
 
 ```
@@ -181,7 +179,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 Copy `servicebus/Config.example.json` to `servicebus/Config.json` and edit it to add or remove queues, topics, and subscriptions. The example configuration includes:
 
-- Namespace: `local-namespace`
+- Namespace: `sbemulatorns`
 - Queue: `queue.1`
 - Topic: `topic.1` with subscription `subscription.1`
 
