@@ -1,4 +1,4 @@
-﻿#Requires -Version 7.0
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Manage the local Docker infrastructure stack.
@@ -466,8 +466,8 @@ function Invoke-Monitor {
         exit 1
     }
 
-    $monitorProject = Join-Path $PSScriptRoot 'servicebus' 'monitor'
-    $configFile     = Join-Path $PSScriptRoot 'servicebus' 'Config.json'
+    $monitorProject = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'monitor'
+    $configFile     = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'Config.json'
 
     Write-Step 'Building monitor tool (first run may take a moment)…'
     $buildOutput = & dotnet build $monitorProject -c Release --nologo -v quiet 2>&1
