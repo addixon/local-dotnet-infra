@@ -179,7 +179,7 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 Copy `servicebus/Config.example.json` to `servicebus/Config.json` and edit it to add or remove queues, topics, and subscriptions. The example configuration includes:
 
-- Namespace: `local-namespace`
+- Namespace: `sbemulatorns`
 - Queue: `queue.1`
 - Topic: `topic.1` with subscription `subscription.1`
 

@@ -2,7 +2,7 @@
   "UserConfig": {
     "Namespaces": [
       {
-        "Name": "local-namespace",
+        "Name": "sbemulatorns",
         "Queues": [
           {
             "Name": "queue.1",
