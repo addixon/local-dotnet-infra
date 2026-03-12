@@ -47,6 +47,69 @@
                 }
               }
             ]
+          },
+          {
+            "Name": "topic.2",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.3",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.4",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.5",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.6",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.7",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.8",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.9",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
+          },
+          {
+            "Name": "topic.10",
+            "Subscriptions": [
+              { "Name": "subscription.1" },
+              { "Name": "monitor" }
+            ]
           }
         ]
       }

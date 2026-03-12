@@ -26,7 +26,9 @@ A Docker-based local development stack providing **MS SQL Server 2025**, **Postg
 |---|---|---|
 | MS SQL Server 2025 (Developer) | `mcr.microsoft.com/mssql/server:2025-latest` | `1433` |
 | PostgreSQL 16 | `postgres:16-alpine` | `5432` |
-| Azure Service Bus Emulator | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | `5672` (AMQP), `5300` (management/health) |
+| Service Bus Emulator Proxy | `.NET 10 (custom)` | `5672` (AMQP), `5300` (management/health) |
+
+The **Service Bus Emulator Proxy** transparently shards topics and queues across multiple Azure Service Bus Emulator instances (50 entities per emulator). Applications connect to a single AMQP + HTTP endpoint and are unaware of the underlying sharding. The proxy dynamically spins up additional emulators as needed.
 
 > **License note** – MS SQL Server Developer Edition and the Azure Service Bus Emulator are both free for local development and testing. No paid Docker Desktop subscription is required; install **Rancher Desktop** via `winget install SUSE.RancherDesktop` on Windows, use [Docker Engine](https://docs.docker.com/engine/install/) on Linux, or [Podman Desktop](https://podman-desktop.io/) on any OS.
 
@@ -83,7 +85,7 @@ the appropriate `docker compose` commands, and verifies the outcome after each a
 | `nuke` | Destroy all containers **and** volumes ⚠ — all data is lost |
 | `status` | Print the current health/status of every container |
 | `logs` | Stream live logs from all services (Ctrl+C to stop) |
-| `logs <service>` | Stream logs from one service (`mssql`, `postgres`, `servicebus`, `servicebus-sql`) |
+| `logs <service>` | Stream logs from one service (`mssql`, `postgres`, `servicebus-proxy`) |
 | `pull` | Pull the latest images without starting the stack |
 | `monitor` | Launch the interactive Service Bus message monitor TUI (see [Service Bus Monitor](#service-bus-monitor)) |
 
@@ -205,13 +207,65 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 ## Customising Service Bus queues and topics
 
-Copy `servicebus/Config.example.json` to `servicebus/Config.json` (if you haven't already) and edit it to define the namespace, queues, and topics the emulator exposes. The example configuration ships with one queue (`queue.1`) and one topic (`topic.1`) with two subscriptions (`subscription.1` and `monitor`).
+Copy `servicebus/Config.example.json` to `servicebus/Config.json` (if you haven't already) and edit it to define the namespace, queues, and topics the emulator exposes. The config file uses the same format as the Azure Service Bus Emulator's `Config.json`, but **you can define more than 50 entities** — the proxy will automatically shard them across multiple emulator instances.
+
+The example configuration ships with one queue (`queue.1`) and ten topics with subscriptions.
 
 > **Important** — Every topic must include a `monitor` subscription. The Service Bus monitor tool (`.\stack.ps1 monitor`) uses this subscription exclusively so that monitoring does not interfere with your application's own subscriptions. If a topic is missing the `monitor` subscription, the monitor will log errors to stderr and retry with exponential backoff until the subscription becomes available.
 
 **Never commit `servicebus/Config.json`** — it is listed in `.gitignore`, just like `.env`. The example file (`Config.example.json`) is the safe-to-commit template.
 
-Restart the `servicebus` container after editing the config file.
+Restart the stack after editing the config file: `.\stack.ps1 restart`
+
+---
+
+## Service Bus Emulator Proxy
+
+The proxy (`servicebus/proxy/`) is a .NET 10 application that sits between your application and one or more Azure Service Bus Emulator instances. It solves the emulator's **50-entity limit** by transparently sharding entities across multiple emulators.
+
+### Architecture
+
+```
+┌─────────────────────────────────────┐
+│  Your Application                   │
+│  (Azure.Messaging.ServiceBus SDK)   │
+└──────────┬──────────────────────────┘
+           │  AMQP (5672) + HTTP (5300)
+           ▼
+┌─────────────────────────────────────┐
+│  ServiceBus Emulator Proxy          │
+│  - Reads master Config.json         │
+│  - Shards entities (50 per shard)   │
+│  - Routes AMQP by entity name      │
+│  - Aggregates management API        │
+│  - Dynamic scaling via Docker API   │
+└──┬──────────┬──────────┬────────────┘
+   │          │          │
+   ▼          ▼          ▼
+┌───────┐ ┌───────┐ ┌───────┐
+│ SB #0 │ │ SB #1 │ │ SB #2 │  ...
+│ +SQL  │ │ +SQL  │ │ +SQL  │
+└───────┘ └───────┘ └───────┘
+```
+
+### How it works
+
+1. **On startup**, the proxy reads `servicebus/Config.json` and splits entities into groups of 50
+2. For each group, it creates a SQL Server container and a Service Bus Emulator container (via the Docker API)
+3. It starts an **AMQP server** on port 5672 that routes messages to the correct backend emulator
+4. It starts an **HTTP server** on port 5300 that aggregates the management API and health endpoint
+5. **Dynamic scaling**: if an application creates a topic via the management API that would exceed an emulator's capacity, the proxy spins up a new emulator
+
+### Proxy endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `http://localhost:5300/health` | Aggregate health of all emulators |
+| `http://localhost:5300/_proxy/status` | Detailed proxy status (shard count, entity count, per-emulator health) |
+
+### Entity limit
+
+The Azure Service Bus Emulator supports a maximum of **50 entities (queues + topics combined)** per namespace. The proxy removes this limitation by distributing entities across multiple emulator instances.
 
 ---
 
@@ -239,11 +293,11 @@ dotnet run
 
 ### How it works
 
-- **Auto-discovers** topics and subscriptions from `servicebus/Config.json`.
+- **Auto-discovers** topics and subscriptions from `servicebus/Config.json` (the master config with all topics across all emulators).
 - **Peeks** messages without consuming them, so your application's subscribers are unaffected.
 - Uses a dedicated `monitor` subscription on each topic (see [Customising Service Bus queues and topics](#customising-service-bus-queues-and-topics)).
 - Provides keyboard navigation to browse messages across topics.
-- Retries with exponential backoff if the Service Bus emulator is not yet available.
+- Retries with exponential backoff if the Service Bus proxy is not yet available.
 - Caps in-memory message storage at 1,000 messages to prevent memory exhaustion.
 
 ---
@@ -261,9 +315,10 @@ If `.\stack.ps1 status` or `docker ps` shows containers as unhealthy:
    ```
 
 2. **Common causes**:
-   - **SQL Server containers** (mssql, servicebus-sql): Password doesn't meet complexity requirements (min 8 chars, upper + lower + digit + special character)
+   - **SQL Server container** (mssql): Password doesn't meet complexity requirements (min 8 chars, upper + lower + digit + special character)
    - **PostgreSQL**: Wrong credentials in `.env` file
-   - **Service Bus**: Internal SQL Server (servicebus-sql) not healthy yet
+   - **Service Bus Proxy**: Docker socket not accessible, or SQL password not set in `.env`
+   - **Service Bus Emulators**: Proxy logs will show which emulator failed to start
 
 3. **Reset and try again**:
    ```powershell
@@ -299,7 +354,7 @@ If you see "port is already allocated" errors:
 
 ### Stack takes too long to start
 
-If `.\stack.ps1 start` times out after 180 seconds:
+If `.\stack.ps1 start` times out after 300 seconds:
 
 1. **Check Docker resources** – Ensure Docker has enough CPU and memory allocated (especially SQL Server)
 
@@ -343,9 +398,26 @@ If your application can't connect:
 ├── docker-compose.yml        # All service definitions with health checks
 ├── stack.ps1                 # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                 # This documentation
+├── docs/
+│   ├── FUTURE-MULTIPLEXING.md    # Spec for full AMQP connection multiplexing
+│   └── FUTURE-ASYNC-SPINUP.md   # Spec for async emulator spin-up
 └── servicebus/
     ├── Config.example.json   # Safe-to-commit template — copy to Config.json and customise
-    └── monitor/
-        ├── Program.cs                # Interactive Service Bus message monitor (.NET 8 TUI)
-        └── ServiceBusMonitor.csproj  # .NET 8 project file
+    ├── emulator-configs/     # Auto-generated per-emulator config shards (gitignored)
+    ├── monitor/
+    │   ├── Program.cs                # Interactive Service Bus message monitor (.NET 8 TUI)
+    │   └── ServiceBusMonitor.csproj  # .NET 8 project file
+    └── proxy/
+        ├── Dockerfile                # Container image for the proxy
+        ├── Program.cs                # Entry point — wires AMQP + HTTP proxy
+        ├── ServiceBusProxy.csproj    # .NET 10 project file
+        ├── Models/
+        │   └── ProxyConfig.cs        # Config, state, and runtime models
+        └── Services/
+            ├── AmqpProxy.cs              # AMQP proxy server + message relay
+            ├── ConfigShardManager.cs     # Config sharding (50 entities per shard)
+            ├── EmulatorOrchestrator.cs   # Docker container lifecycle management
+            ├── EntityRouter.cs           # Entity → emulator routing
+            ├── ManagementProxy.cs        # HTTP management API proxy
+            └── StateManager.cs           # State persistence
 ```

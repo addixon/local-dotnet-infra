@@ -1,0 +1,364 @@
+{
+    "UserConfig": {
+        "Logging": {
+            "Type": "File"
+        },
+        "Namespaces": [
+            {
+                "Topics": [
+                    {
+                        "Name": "topic.1",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "activate-products-command",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "active-product-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "active-product-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "asset-dealer-association-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "asset-dealer-association-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-dealer-association-created",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-dealer-association-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-dealer-association-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-updated",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "company-updated-events-dump",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "connectivity-included-fleet-upgrade-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "create-activeproducts-command",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "create-products-command",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "deactivate-products-command",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-installed-on-vehicle-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-ownership-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-replaced-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-transferred-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-type-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-uninstalled-from-vehicle-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "device-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "eds-vehicle-data-changed-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "eol-started-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "precision-product-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "precision-product-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "product-activation-status-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "product-subscribed-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "product-subscription-failed-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "product-subscription-pending-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "product-unlocked-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "product-unlocked-failed-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "products-applied-to-device-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "t_tierra_device_provisioning",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "t_tierra_device_provisioning-newstorage",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "telco-activated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "telco-activation-failed-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "telco-activation-pending-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "update-activeproducts-command",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "user-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "user-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "vehicle-created-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "vehicle-ownership-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "vehicle-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "vehicle-warranty-startdate-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "warranty-startdate-updated-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    },
+                    {
+                        "Name": "workflow-activation-event",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" },
+                            { "Name": "monitor" }
+                        ]
+                    }
+                ],
+                "Name": "sbemulatorns"
+            }
+        ]
+    }
+}

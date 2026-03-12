@@ -1,5 +1,9 @@
 # docker-compose.yml
-# Local infrastructure stack: MS SQL Server 2025 · PostgreSQL · Azure Service Bus Emulator
+# Local infrastructure stack: MS SQL Server 2025 · PostgreSQL · Azure Service Bus Emulator Proxy
+#
+# The Service Bus Emulator Proxy transparently shards topics/queues across
+# multiple emulator instances (50 entities each), presenting a single AMQP
+# and management endpoint to applications.
 #
 # Prerequisites:
 #   - Docker (license-free runtime: Docker Engine on Linux, Rancher Desktop, or Podman)
@@ -7,6 +11,7 @@
 #
 # Quick start:
 #   cp .env.example .env        # then edit .env with your secrets
+#   cp servicebus/Config.example.json servicebus/Config.json
 #   docker compose up -d        # start all services
 #   docker compose down         # stop all services
 #   docker compose down -v      # stop and remove persistent volumes
@@ -53,46 +58,35 @@ services:
       retries: 5
       start_period: 10s
 
-  # ── Azure Service Bus Emulator (internal SQL Server dependency) ───────────────
-  servicebus-sql:
-    image: mcr.microsoft.com/mssql/server:2025-latest
-    container_name: local-servicebus-sql
+  # ── Azure Service Bus Emulator Proxy ────────────────────────────────────────
+  # The proxy reads a large Config.json, shards entities across multiple
+  # emulator instances (created dynamically via the Docker API), and exposes
+  # a single AMQP + HTTP management endpoint.
+  servicebus-proxy:
+    build: ./servicebus/proxy
+    container_name: local-servicebus-proxy
     restart: unless-stopped
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_PID: Developer
-      SA_PASSWORD: "${SERVICEBUS_SQL_PASSWORD}"
-    volumes:
-      - servicebus_sql_data:/var/opt/mssql
-    healthcheck:
-      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$SA_PASSWORD" -C -b -Q "SELECT 1" -o /dev/null || exit 1
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-
-  # ── Azure Service Bus Emulator ────────────────────────────────────────────────
-  servicebus:
-    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
-    container_name: local-servicebus
-    restart: unless-stopped
-    environment:
-      ACCEPT_EULA: "Y"
-      SQL_SERVER: servicebus-sql
-      MSSQL_SA_PASSWORD: "${SERVICEBUS_SQL_PASSWORD}"
+      PROXY_CONFIG_PATH: /config/Config.json
+      PROXY_STATE_PATH: /state/proxy-state.json
+      EMULATOR_CONFIG_DIR: /emulator-configs
+      PROXY_AMQP_PORT: "5672"
+      PROXY_MGMT_PORT: "5300"
+      SERVICEBUS_SQL_PASSWORD: "${SERVICEBUS_SQL_PASSWORD}"
+      DOCKER_NETWORK: "local-infrastructure_default"
     ports:
       - "${SERVICEBUS_PORT:-5672}:5672"
       - "${SERVICEBUS_MGMT_PORT:-5300}:5300"
     volumes:
-      - ./servicebus/Config.json:/ServiceBus_Emulator/ConfigFiles/Config.json
-    depends_on:
-      servicebus-sql:
-        condition: service_healthy
-    # NOTE: No Docker healthcheck — the emulator image (CBL-Mariner based) has no
-    # shell (/bin/sh), so CMD-SHELL health checks always fail.  Health is verified
-    # externally by stack.ps1 via the /health HTTP endpoint on the management port.
+      - ./servicebus/Config.json:/config/Config.json:ro
+      - ./servicebus/emulator-configs:/emulator-configs
+      - servicebus_proxy_state:/state
+      - /var/run/docker.sock:/var/run/docker.sock
+    # NOTE: Health is verified externally by stack.ps1 via the /health HTTP
+    # endpoint on the management port. The proxy aggregates health from all
+    # backend emulator instances.
 
 volumes:
   mssql_data:
   postgres_data:
-  servicebus_sql_data:
+  servicebus_proxy_state:

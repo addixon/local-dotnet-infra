@@ -14,5 +14,15 @@ servicebus/Config.json
 # .NET build artifacts (servicebus monitor tool)
 servicebus/monitor/bin/
 servicebus/monitor/obj/
-servicebus/Config.json
+
+# .NET build artifacts (servicebus proxy)
+servicebus/proxy/bin/
+servicebus/proxy/obj/
+
+# Proxy-generated emulator config shards (created at runtime)
+servicebus/emulator-configs/*
+!servicebus/emulator-configs/.gitkeep
+
+# Proxy state (persisted across restarts, deleted on nuke)
+servicebus/proxy-state.json
 /servicebus/Config.json

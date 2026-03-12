@@ -52,17 +52,23 @@ $ErrorActionPreference = 'Stop'
 $Script:ComposeFile = Join-Path $PSScriptRoot 'docker-compose.yml'
 $Script:EnvFile     = Join-Path $PSScriptRoot '.env'
 $Script:ConfigFile  = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'Config.json'
-$Script:Timeout     = 180   # seconds before health-wait gives up
+$Script:Timeout     = 300   # seconds before health-wait gives up (proxy needs time to spin up emulators)
+
+# Disable BuildKit — Rancher Desktop and Podman do not always support it.
+# This ensures `docker compose build` uses the classic builder.
+$env:DOCKER_BUILDKIT = '0'
+
+# Label used by the proxy to tag dynamically created emulator/SQL containers
+$Script:ProxyLabel = 'managed-by=servicebus-proxy'
 
 # Services in start-up dependency order, with container names and health-check style.
 # HealthUrl: when set, stack.ps1 checks this HTTP endpoint from the host instead of
 #            relying on Docker's built-in HEALTHCHECK (needed when the container image
-#            has no shell, e.g. the Service Bus emulator).
+#            has no shell, e.g. the Service Bus emulator proxy).
 $Script:ServiceDefs = @(
-    [PSCustomObject]@{ Name = 'mssql';         Container = 'local-mssql';         HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
-    [PSCustomObject]@{ Name = 'postgres';       Container = 'local-postgres';       HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
-    [PSCustomObject]@{ Name = 'servicebus-sql'; Container = 'local-servicebus-sql'; HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
-    [PSCustomObject]@{ Name = 'servicebus';     Container = 'local-servicebus';     HasHealth = $false; HealthUrl = 'http://localhost:{0}/health'; HealthPort = 5300; InitialDelay = 10 }
+    [PSCustomObject]@{ Name = 'mssql';            Container = 'local-mssql';            HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
+    [PSCustomObject]@{ Name = 'postgres';          Container = 'local-postgres';          HasHealth = $true;  HealthUrl = $null;                            InitialDelay = 0 }
+    [PSCustomObject]@{ Name = 'servicebus-proxy';  Container = 'local-servicebus-proxy';  HasHealth = $false; HealthUrl = 'http://localhost:{0}/health'; HealthPort = 5300; InitialDelay = 30 }
 )
 
 # ─── Terminal colour helpers ───────────────────────────────────────────────────
@@ -325,6 +331,30 @@ function Show-Status {
         Write-Host "  $svcCol $stC $hlC $ports"
     }
 
+    # Show proxy-managed emulator containers (dynamic)
+    $proxyContainers = docker ps -a --filter "label=$($Script:ProxyLabel)" --format '{{.Names}}|{{.State}}|{{.Ports}}' 2>$null
+    if ($proxyContainers) {
+        Write-Host ("  " + (Dim ('─' * ($w.svc + 1 + $w.st + 1 + $w.hl + 1 + 10))))
+        Write-Host "  $(Dim 'Proxy-managed emulator instances:')"
+        $lines = @($proxyContainers -split "`n" | Where-Object { $_ })
+        foreach ($line in $lines) {
+            $parts = $line -split '\|'
+            $cName  = if ($parts.Count -gt 0) { $parts[0] } else { '?' }
+            $cState = if ($parts.Count -gt 1) { $parts[1] } else { '?' }
+            $cPorts = if ($parts.Count -gt 2) { $parts[2] } else { '' }
+
+            $svcCol = ("  " + $cName).PadRight($w.svc)
+            $stCol  = $cState.PadRight($w.st)
+            $stC = switch ($cState) {
+                'running' { Green  $stCol }
+                'exited'  { Yellow $stCol }
+                'dead'    { BRed   $stCol }
+                default   { Dim    $stCol }
+            }
+            Write-Host "  $svcCol $stC $(Dim '-'.PadRight($w.hl)) $cPorts"
+        }
+    }
+
     Write-Host ''
 }
 
@@ -369,12 +399,29 @@ function Assert-ConfigFile {
         Write-Host ''
         exit 1
     }
+
+    # Ensure the emulator-configs directory exists (bind mount target)
+    $configDir = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'emulator-configs'
+    if (-not (Test-Path $configDir)) {
+        $null = New-Item -ItemType Directory -Path $configDir -Force
+    }
 }
 
 # ─── Actions ──────────────────────────────────────────────────────────────────
 
 function Invoke-Start {
     Write-Header 'Starting stack'
+
+    Write-Step 'Building proxy image…'
+    Write-Host ''
+    $null = Invoke-Compose 'build'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Fail 'Failed to build proxy image.'
+        exit 1
+    }
+    Write-Host ''
+
     Write-Step 'Bringing up services (docker compose up -d)…'
     Write-Host ''
     $rc = Invoke-Compose 'up', '-d', '--remove-orphans'
@@ -393,6 +440,19 @@ function Invoke-Start {
 
 function Invoke-Stop {
     Write-Header 'Stopping stack'
+
+    # Stop proxy-managed emulator/SQL containers first
+    Write-Step 'Stopping proxy-managed emulator containers…'
+    $proxyContainers = docker ps -a --filter "label=$($Script:ProxyLabel)" --format '{{.ID}}' 2>$null
+    if ($proxyContainers) {
+        $ids = @($proxyContainers -split "`n" | Where-Object { $_ })
+        foreach ($id in $ids) {
+            docker stop $id *>$null
+            docker rm -f $id *>$null
+        }
+        Write-Success "Stopped $($ids.Count) proxy-managed container(s)."
+    }
+
     Write-Step 'Running docker compose down…'
     Write-Host ''
     $rc = Invoke-Compose 'down'
@@ -415,6 +475,19 @@ function Invoke-Stop {
 
 function Invoke-Restart {
     Write-Header 'Restarting stack'
+
+    # Stop proxy-managed containers first
+    Write-Step 'Stopping proxy-managed emulator containers…'
+    $proxyContainers = docker ps -a --filter "label=$($Script:ProxyLabel)" --format '{{.ID}}' 2>$null
+    if ($proxyContainers) {
+        $ids = @($proxyContainers -split "`n" | Where-Object { $_ })
+        foreach ($id in $ids) {
+            docker stop $id *>$null
+            docker rm -f $id *>$null
+        }
+        Write-Success "Stopped $($ids.Count) proxy-managed container(s)."
+    }
+
     Write-Step 'Stopping containers…'
     Write-Host ''
     $rc = Invoke-Compose 'down'
@@ -424,6 +497,16 @@ function Invoke-Restart {
         exit 1
     }
     Write-Host ''
+    Write-Step 'Building proxy image…'
+    Write-Host ''
+    $null = Invoke-Compose 'build'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Fail 'Failed to build proxy image.'
+        exit 1
+    }
+    Write-Host ''
+
     Write-Step 'Starting containers…'
     Write-Host ''
     $rc = Invoke-Compose 'up', '-d', '--remove-orphans'
@@ -445,6 +528,7 @@ function Invoke-Nuke {
     Write-Host "  $(BRed "  ⚠  WARNING")"
     Write-Host "  $(Red "     This action permanently deletes all container volumes.")"
     Write-Host "  $(Red "     All database data (SQL Server, PostgreSQL) will be lost.")"
+    Write-Host "  $(Red "     All dynamically created Service Bus emulators will be removed.")"
     Write-Host ''
     Write-Host "  $(BYellow "Type 'YES' to confirm, or press Enter to abort.")"
     $answer = Read-Host '  >'
@@ -455,6 +539,22 @@ function Invoke-Nuke {
         exit 0
     }
     Write-Host ''
+
+    # Remove dynamically created emulator/SQL containers (managed by the proxy)
+    Write-Step 'Removing proxy-managed emulator containers…'
+    $proxyContainers = docker ps -a --filter "label=$($Script:ProxyLabel)" --format '{{.ID}}' 2>$null
+    if ($proxyContainers) {
+        $ids = @($proxyContainers -split "`n" | Where-Object { $_ })
+        foreach ($id in $ids) {
+            docker stop $id *>$null
+            docker rm -f $id *>$null
+        }
+        Write-Success "Removed $($ids.Count) proxy-managed container(s)."
+    } else {
+        Write-Step 'No proxy-managed containers found.'
+    }
+    Write-Host ''
+
     Write-Step 'Running docker compose down -v…'
     Write-Host ''
     $rc = Invoke-Compose 'down', '-v'
@@ -464,6 +564,14 @@ function Invoke-Nuke {
         exit 1
     }
     Write-Host ''
+
+    # Clean up emulator config shards and proxy state
+    $emulatorConfigDir = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'emulator-configs'
+    if (Test-Path $emulatorConfigDir) {
+        Remove-Item -Path $emulatorConfigDir -Recurse -Force
+        Write-Step 'Removed emulator config shards.'
+    }
+
     Write-Step 'Verifying containers are removed…'
     $still = @($Script:ServiceDefs | Where-Object { (Get-CStatus $_.Container) -ne 'absent' })
     if ($still.Count -gt 0) {
@@ -471,7 +579,7 @@ function Invoke-Nuke {
         Write-Fail "Container(s) still present: $names"
         exit 1
     }
-    Write-Success 'Stack nuked — all containers and volumes have been removed.'
+    Write-Success 'Stack nuked — all containers, volumes, and proxy state have been removed.'
     Write-Host ''
 }
 
@@ -526,16 +634,16 @@ function Invoke-Monitor {
         exit 1
     }
 
-    # Ensure the stack (and Service Bus emulator) is running and healthy
-    $sbStatus = Get-CStatus 'local-servicebus'
-    $sbDef    = $Script:ServiceDefs | Where-Object { $_.Name -eq 'servicebus' }
+    # Ensure the stack (and Service Bus proxy) is running and healthy
+    $sbStatus = Get-CStatus 'local-servicebus-proxy'
+    $sbDef    = $Script:ServiceDefs | Where-Object { $_.Name -eq 'servicebus-proxy' }
     $sbReady  = $false
     if ($sbStatus -eq 'running' -and $sbDef.HealthUrl) {
-        $port = Get-HostPort 'local-servicebus' $sbDef.HealthPort
+        $port = Get-HostPort 'local-servicebus-proxy' $sbDef.HealthPort
         if ($port) { $sbReady = Test-HealthEndpoint ($sbDef.HealthUrl -f $port) }
     }
     if (-not $sbReady) {
-        Write-Step 'Service Bus emulator is not running – starting the stack…'
+        Write-Step 'Service Bus proxy is not running – starting the stack…'
         Write-Host ''
         $rc = Invoke-Compose 'up', '-d', '--remove-orphans'
         if ($rc -ne 0) {
@@ -563,6 +671,8 @@ function Invoke-Monitor {
     Write-Success 'Monitor tool ready.'
     Write-Host ''
 
+    # The monitor reads Config.json for topic discovery and connects
+    # to the proxy's AMQP endpoint (same connection string as direct emulator)
     & dotnet run --project $monitorProject -c Release --no-build -- $Script:ConfigFile
 }
 

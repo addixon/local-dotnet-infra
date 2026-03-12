@@ -11,9 +11,10 @@
 | Container orchestration | Docker Compose v2+ |
 | Container runtime | Docker Engine, Rancher Desktop, or Podman (all license-free) |
 | Relational databases | MS SQL Server 2025 Developer Edition, PostgreSQL 16 (Alpine) |
-| Message broker | Azure Service Bus Emulator (AMQP on port 5672, management on 5300) |
+| Message broker | Azure Service Bus Emulator Proxy (AMQP on port 5672, management on 5300) — shards across multiple emulators |
 | Stack management script | PowerShell 5.1+ (`stack.ps1`) |
 | Service Bus monitor tool | C# / .NET 8.0 (`servicebus/monitor/Program.cs`) |
+| Service Bus proxy | C# / .NET 10.0 (`servicebus/proxy/Program.cs`) |
 | Configuration | Environment variables via `.env` file, JSON for Service Bus entities (`Config.example.json` → `Config.json`) |
 
 ## File Structure
@@ -22,14 +23,24 @@
 .
 ├── .env.example             # Template — copy to .env and set real passwords
 ├── .gitignore               # Excludes .env, Config.json, build artifacts, OS files
-├── docker-compose.yml       # All service definitions with health checks (servicebus monitored externally)
+├── docker-compose.yml       # All service definitions (proxy monitored externally by stack.ps1)
 ├── stack.ps1                # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
 ├── README.md                # Comprehensive user documentation
+├── docs/
+│   ├── FUTURE-MULTIPLEXING.md   # Spec for full AMQP multiplexing support
+│   └── FUTURE-ASYNC-SPINUP.md  # Spec for async emulator spin-up
 └── servicebus/
-    ├── Config.example.json   # Template — copy to Config.json and customise queues/topics
-    └── monitor/
+    ├── Config.example.json   # Template — copy to Config.json and customise queues/topics (>50 entities OK)
+    ├── emulator-configs/     # Auto-generated per-emulator config shards (gitignored)
+    ├── monitor/
         ├── Program.cs        # Interactive TUI Service Bus message monitor (.NET 8)
         └── ServiceBusMonitor.csproj  # .NET project file (targets net8.0)
+    ├── proxy/
+        ├── Program.cs        # ServiceBus Emulator Proxy entry point (.NET 10)
+        ├── ServiceBusProxy.csproj  # .NET project file (targets net10.0)
+        ├── Dockerfile        # Container image for the proxy
+        ├── Models/           # Config, state, and runtime models
+        └── Services/         # AMQP proxy, management proxy, Docker orchestrator
 ```
 
 ## Docker Services
@@ -38,8 +49,11 @@
 |---|---|---|---|---|
 | MS SQL Server 2025 | `local-mssql` | `mcr.microsoft.com/mssql/server:2025-latest` | 1433 | `sqlcmd SELECT 1` (15 s interval) |
 | PostgreSQL 16 | `local-postgres` | `postgres:16-alpine` | 5432 | `pg_isready` (10 s interval) |
-| Service Bus SQL (internal) | `local-servicebus-sql` | `mcr.microsoft.com/mssql/server:2025-latest` | none (internal) | `sqlcmd SELECT 1` (15 s interval) |
-| Service Bus Emulator | `local-servicebus` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | 5672, 5300 | Host-side HTTP GET `/health` via stack.ps1 (container has no shell) |
+| Service Bus Proxy | `local-servicebus-proxy` | Custom (.NET 10) | 5672, 5300 | Host-side HTTP GET `/health` via stack.ps1 |
+| Service Bus SQL (dynamic) | `sbproxy-sql-N` | `mcr.microsoft.com/mssql/server:2025-latest` | none (internal) | `sqlcmd SELECT 1` (managed by proxy) |
+| Service Bus Emulator (dynamic) | `sbproxy-emulator-N` | `mcr.microsoft.com/azure-messaging/servicebus-emulator:latest` | internal only | HTTP `/health` (managed by proxy) |
+
+The proxy dynamically creates SQL and emulator containers via the Docker API. These containers are labeled `managed-by=servicebus-proxy` for cleanup.
 
 All services use `restart: unless-stopped`, named volumes for persistence, and proper `depends_on` with health conditions.
 
@@ -64,9 +78,18 @@ All services use `restart: unless-stopped`, named volumes for persistence, and p
 - Use comment section dividers matching the PowerShell style: `// ─── Section ───`.
 - Cap in-memory collections to prevent memory exhaustion (e.g. 1000 messages max).
 
+### C# / .NET (`servicebus/proxy/`)
+
+- Target **.NET 10.0** with `<ImplicitUsings>enable</ImplicitUsings>` and `<Nullable>enable</Nullable>`.
+- Uses AMQPNetLite for AMQP proxy server (ContainerHost, SenderLink, ReceiverLink).
+- Uses Docker.DotNet for dynamic container management via the Docker socket.
+- ASP.NET Core minimal APIs for the HTTP management proxy.
+- Use comment section dividers matching the PowerShell style: `// ─── Section ───`.
+- Handle errors gracefully; individual emulator failures should not crash the proxy.
+
 ### Docker Compose (`docker-compose.yml`)
 
-- All services are health-checked; `servicebus` is probed from the host via stack.ps1 because its image lacks a shell (no Docker `healthcheck` block).
+- All services are health-checked; `servicebus-proxy` is probed from the host via stack.ps1 because it manages its own emulator containers.
 - Use environment variable substitution with defaults: `${VAR:-default}`.
 - All secrets must come from the `.env` file — never hard-code passwords.
 - Define named volumes for any persistent data.
@@ -83,7 +106,7 @@ All services use `restart: unless-stopped`, named volumes for persistence, and p
 - Use inline comments to explain *why*, not *what*.
 - Provide clear, actionable error messages for troubleshooting.
 - Degrade gracefully when optional features are unavailable (e.g. ANSI colours).
-- Never commit secrets — the `.env` file is in `.gitignore`.
+- Never commit secrets — the `.env` and `Config` file is in `.gitignore`.
 
 ## Environment Variables
 
@@ -153,12 +176,13 @@ The monitor auto-discovers topics and subscriptions from `servicebus/Config.json
 
 ## Key Guidelines for Changes
 
-1. **Health checks are critical** — all services are health-checked; `servicebus` is probed from the host via stack.ps1 (no in-container healthcheck) so `stack.ps1` and `depends_on` conditions work correctly.
+1. **Health checks are critical** — all services are health-checked; `servicebus-proxy` is probed from the host via stack.ps1 (no in-container healthcheck) so `stack.ps1` and `depends_on` conditions work correctly.
 2. **Never commit `.env` or `servicebus/Config.json`** — both contain local configuration and are git-ignored.
 3. **Test on PowerShell 5.1+** — the management script targets PowerShell 5.1 for broad compatibility; do not introduce PowerShell 7+-only syntax.
 4. **Maintain the TUI styling** — both `stack.ps1` and `Program.cs` share a consistent ANSI/Unicode visual style; keep it consistent when modifying either.
-5. **Service Bus emulator depends on its internal SQL Server** — changes to `servicebus-sql` can break `servicebus`.
-6. **Volumes preserve data across restarts** — only `nuke` destroys volumes.
+5. **Service Bus proxy manages emulators dynamically** — the proxy creates SQL and emulator containers via the Docker API. These are labeled `managed-by=servicebus-proxy` for cleanup.
+6. **Volumes preserve data across restarts** — only `nuke` destroys volumes and proxy-managed containers.
 7. **No CI/CD pipelines exist** — this is an infrastructure-only repository.
 8. **Password complexity** — SQL Server passwords must meet complexity rules (min 8 chars, mixed case, digit, special char).
 9. **Keep `Config.example.json` updated** — changes to Service Bus entity definitions should be reflected in the example file.
+10. **50-entity limit per emulator** — the proxy shards entities across emulators; the limit is fixed at 50 entities (queues + topics combined) per the emulator's documented quotas.
