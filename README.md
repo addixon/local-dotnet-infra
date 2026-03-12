@@ -241,7 +241,7 @@ The proxy (`servicebus/proxy/`) is a .NET 10 application that sits between your 
 │  ServiceBus Emulator Proxy          │
 │  - Reads master Config.json         │
 │  - Shards entities (50 per shard)   │
-│  - Routes AMQP by entity name      │
+│  - Routes AMQP by entity name       │
 │  - Aggregates management API        │
 │  - Dynamic scaling via Docker API   │
 └──┬──────────┬──────────┬────────────┘
