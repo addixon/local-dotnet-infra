@@ -1,121 +1,20 @@
 {
-  "UserConfig": {
-    "Namespaces": [
-      {
-        "Name": "sbemulatorns",
-        "Queues": [
-          {
-            "Name": "queue.1",
-            "Properties": {
-              "DeadLetteringOnMessageExpiration": false,
-              "DefaultMessageTimeToLive": "PT1H",
-              "DuplicateDetectionHistoryTimeWindow": "PT20S",
-              "LockDuration": "PT1M",
-              "MaxDeliveryCount": 10,
-              "RequiresDuplicateDetection": false,
-              "RequiresSession": false
+    "UserConfig": {
+        "Logging": {
+            "Type": "File"
+        },
+        "Namespaces": [
+            {
+                "Topics": [
+                    {
+                        "Name": "topic.1",
+                        "Subscriptions": [
+                            { "Name": "subscription.1" }
+                        ]
+                    }
+                ],
+                "Name": "sbemulatorns"
             }
-          }
-        ],
-        "Topics": [
-          {
-            "Name": "topic.1",
-            "Properties": {
-              "DefaultMessageTimeToLive": "PT1H",
-              "DuplicateDetectionHistoryTimeWindow": "PT20S",
-              "RequiresDuplicateDetection": false
-            },
-            "Subscriptions": [
-              {
-                "Name": "subscription.1",
-                "Properties": {
-                  "DeadLetteringOnMessageExpiration": false,
-                  "DefaultMessageTimeToLive": "PT1H",
-                  "LockDuration": "PT1M",
-                  "MaxDeliveryCount": 10,
-                  "RequiresSession": false
-                }
-              },
-              {
-                "Name": "monitor",
-                "Properties": {
-                  "DeadLetteringOnMessageExpiration": false,
-                  "DefaultMessageTimeToLive": "PT1H",
-                  "LockDuration": "PT1M",
-                  "MaxDeliveryCount": 10,
-                  "RequiresSession": false
-                }
-              }
-            ]
-          },
-          {
-            "Name": "topic.2",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.3",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.4",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.5",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.6",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.7",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.8",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.9",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          },
-          {
-            "Name": "topic.10",
-            "Subscriptions": [
-              { "Name": "subscription.1" },
-              { "Name": "monitor" }
-            ]
-          }
         ]
-      }
-    ],
-    "Logging": {
-      "Type": "File"
     }
-  }
 }

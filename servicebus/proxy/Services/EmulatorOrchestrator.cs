@@ -361,16 +361,15 @@ sealed class EmulatorOrchestrator : IAsyncDisposable
     /// <summary>Check aggregate health of all emulator instances.</summary>
     public async Task<(bool AllHealthy, List<object> Details)> GetAggregateHealthAsync()
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        var details = new List<object>();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
         var allHealthy = true;
 
-        foreach (var inst in _instances)
+        // Check all emulators in parallel to keep the aggregate response fast
+        var tasks = _instances.Select(async inst =>
         {
             bool healthy;
             try
             {
-                // Health check via Docker network (container name + internal port)
                 var resp = await http.GetAsync($"http://{inst.ContainerName}:{InternalMgmtPort}/health");
                 healthy = resp.IsSuccessStatusCode;
             }
@@ -380,6 +379,14 @@ sealed class EmulatorOrchestrator : IAsyncDisposable
             }
 
             inst.Healthy = healthy;
+            return (inst, healthy);
+        }).ToList();
+
+        var results = await Task.WhenAll(tasks);
+        var details = new List<object>();
+
+        foreach (var (inst, healthy) in results)
+        {
             if (!healthy) allHealthy = false;
 
             details.Add(new

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Xml.Linq;
 using Azure.Messaging.ServiceBus;
 
 // ─── JSON configuration models ───────────────────────────────────────────────
@@ -67,10 +68,13 @@ internal static class Program
     static ViewMode _view = ViewMode.Messages;
     static int _detailScrollOffset;
 
-    // Dynamic subscription tracking — only the well-known "monitor" subscription is used
-    const string MonitorSubscriptionName = "monitor";
-    const int ConfigPollIntervalMs = 5000;
-    static readonly ConcurrentDictionary<string, bool> _activeTopics = new();
+    // Dynamic discovery — tracks topic/subscription pairs via the management API
+    const int DiscoveryPollIntervalMs = 5000;
+    static readonly ConcurrentDictionary<string, bool> _activeSubscriptions = new();
+    static string _managementUrl = "http://localhost:5300";
+    static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+    static readonly XNamespace Atom = "http://www.w3.org/2005/Atom";
+    static readonly XNamespace SbNs = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
 
     // ── ANSI helpers (mirrors stack.ps1 style) ───────────────────────────────
 
@@ -90,16 +94,16 @@ internal static class Program
     {
         if (args.Length < 1)
         {
-            Console.Error.WriteLine("Usage: ServiceBusMonitor <config-path>");
+            Console.Error.WriteLine("Usage: ServiceBusMonitor <management-url> [config-path]");
+            Console.Error.WriteLine("  e.g.: ServiceBusMonitor http://localhost:80");
+            Console.Error.WriteLine("  e.g.: ServiceBusMonitor http://localhost:80 servicebus/Config.json");
             return 1;
         }
 
-        var configPath = args[0];
-        if (!File.Exists(configPath))
-        {
-            Console.Error.WriteLine($"Config file not found: {configPath}");
-            return 1;
-        }
+        _managementUrl = args[0].TrimEnd('/');
+
+        // Optional config path for initial topic seeding (backwards compatibility)
+        string? configPath = args.Length >= 2 ? args[1] : null;
 
         // Well-known connection string for the Azure Service Bus Emulator.
         // "SAS_KEY_VALUE" is the default placeholder accepted by the emulator;
@@ -112,8 +116,9 @@ internal static class Program
 
         await using var client = new ServiceBusClient(connectionString);
 
-        // Load initial subscriptions from config (may be empty)
-        LoadEndpointsFromConfig(configPath, client, _cts.Token);
+        // Seed from config if provided
+        if (configPath is not null && File.Exists(configPath))
+            LoadEndpointsFromConfig(configPath, client, _cts.Token);
 
         // Setup console
         Console.CursorVisible = false;
@@ -124,8 +129,8 @@ internal static class Program
             _cts.Cancel();
         };
 
-        // Watch config for new subscriptions
-        _ = WatchConfigAsync(configPath, client, _cts.Token);
+        // Discover topics/subscriptions from the management API
+        _ = DiscoverFromManagementApiAsync(client, _cts.Token);
 
         try
         {
@@ -141,7 +146,7 @@ internal static class Program
         return 0;
     }
 
-    // ── Config loading & watching ────────────────────────────────────────────
+    // ── Config loading (optional seed) ─────────────────────────────────────
 
     static void LoadEndpointsFromConfig(string configPath, ServiceBusClient client, CancellationToken ct)
     {
@@ -165,24 +170,89 @@ internal static class Program
         {
             foreach (var topic in ns.Topics ?? [])
             {
-                // Use the well-known "monitor" subscription for conflict-free monitoring
-                if (_activeTopics.TryAdd(topic.Name, true))
+                foreach (var sub in topic.Subscriptions ?? [])
                 {
-                    _needsRedraw = true;
-                    _ = PollMessagesAsync(client, topic.Name, MonitorSubscriptionName, ct);
+                    StartMonitoring(client, topic.Name, sub.Name, ct);
                 }
             }
         }
     }
 
-    static async Task WatchConfigAsync(string configPath, ServiceBusClient client, CancellationToken ct)
+    // ── Management API discovery ─────────────────────────────────────────────
+
+    static async Task DiscoverFromManagementApiAsync(ServiceBusClient client, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(ConfigPollIntervalMs, ct); }
+            try
+            {
+                var topics = await GetTopicNamesAsync(ct);
+                foreach (var topic in topics)
+                {
+                    var subs = await GetSubscriptionNamesAsync(topic, ct);
+                    foreach (var sub in subs)
+                    {
+                        StartMonitoring(client, topic, sub, ct);
+                    }
+                }
+            }
             catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                _incomingErrors.Enqueue(new MonitoredError(
+                    DateTimeOffset.Now, "(discovery)", _managementUrl, ex.Message));
+                _needsRedraw = true;
+            }
 
-            LoadEndpointsFromConfig(configPath, client, ct);
+            try { await Task.Delay(DiscoveryPollIntervalMs, ct); }
+            catch (OperationCanceledException) { break; }
+        }
+    }
+
+    static async Task<List<string>> GetTopicNamesAsync(CancellationToken ct)
+    {
+        var names = new List<string>();
+        var resp  = await _httpClient.GetStringAsync($"{_managementUrl}/$Resources/Topics", ct);
+        try
+        {
+            var doc = XDocument.Parse(resp);
+            foreach (var entry in doc.Descendants(Atom + "entry"))
+            {
+                var title = entry.Element(Atom + "title")?.Value;
+                if (!string.IsNullOrWhiteSpace(title))
+                    names.Add(title);
+            }
+        }
+        catch { /* non-XML response */ }
+        return names;
+    }
+
+    static async Task<List<string>> GetSubscriptionNamesAsync(string topicName, CancellationToken ct)
+    {
+        var names = new List<string>();
+        try
+        {
+            var resp = await _httpClient.GetStringAsync(
+                $"{_managementUrl}/{Uri.EscapeDataString(topicName)}/Subscriptions", ct);
+            var doc = XDocument.Parse(resp);
+            foreach (var entry in doc.Descendants(Atom + "entry"))
+            {
+                var title = entry.Element(Atom + "title")?.Value;
+                if (!string.IsNullOrWhiteSpace(title))
+                    names.Add(title);
+            }
+        }
+        catch { /* topic may not have subscriptions yet */ }
+        return names;
+    }
+
+    static void StartMonitoring(ServiceBusClient client, string topicName, string subName, CancellationToken ct)
+    {
+        var key = $"{topicName}/{subName}";
+        if (_activeSubscriptions.TryAdd(key, true))
+        {
+            _needsRedraw = true;
+            _ = PollMessagesAsync(client, topicName, subName, ct);
         }
     }
 
@@ -194,9 +264,6 @@ internal static class Program
         string subscriptionName,
         CancellationToken ct)
     {
-        var receiver = client.CreateReceiver(topicName, subscriptionName,
-            new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.PeekLock });
-
         long lastSeq = 0;
         int retryDelay = 1000;
         const int maxRetryDelay = 30000;
@@ -205,53 +272,56 @@ internal static class Program
         {
             while (!ct.IsCancellationRequested)
             {
+                // Create a fresh receiver each outer iteration so stale
+                // connections ("owner is being closed") are recovered.
+                await using var receiver = client.CreateReceiver(topicName, subscriptionName,
+                    new ServiceBusReceiverOptions { ReceiveMode = ServiceBusReceiveMode.PeekLock });
+
                 try
                 {
-                    var batch = await receiver.PeekMessagesAsync(
-                        maxMessages: 50,
-                        fromSequenceNumber: lastSeq + 1,
-                        cancellationToken: ct);
-
-                    // Reset retry delay on success
-                    retryDelay = 1000;
-
-                    foreach (var msg in batch)
+                    while (!ct.IsCancellationRequested)
                     {
-                        if (msg.SequenceNumber <= lastSeq) continue;
-                        lastSeq = msg.SequenceNumber;
+                        var batch = await receiver.PeekMessagesAsync(
+                            maxMessages: 50,
+                            fromSequenceNumber: lastSeq + 1,
+                            cancellationToken: ct);
 
-                        string body;
-                        try { body = msg.Body.ToString(); }
-                        catch { body = "(unable to read body)"; }
+                        retryDelay = 1000; // reset on success
 
-                        var props = new Dictionary<string, object>();
-                        foreach (var kvp in msg.ApplicationProperties)
-                            props[kvp.Key] = kvp.Value;
+                        foreach (var msg in batch)
+                        {
+                            if (msg.SequenceNumber <= lastSeq) continue;
+                            lastSeq = msg.SequenceNumber;
 
-                        _incoming.Enqueue(new MonitoredMessage(
-                            msg.MessageId,
-                            topicName,
-                            subscriptionName,
-                            msg.EnqueuedTime,
-                            msg.Subject,
-                            props,
-                            body,
-                            msg.SequenceNumber));
+                            string body;
+                            try { body = msg.Body.ToString(); }
+                            catch { body = "(unable to read body)"; }
+
+                            var props = new Dictionary<string, object>();
+                            foreach (var kvp in msg.ApplicationProperties)
+                                props[kvp.Key] = kvp.Value;
+
+                            _incoming.Enqueue(new MonitoredMessage(
+                                msg.MessageId,
+                                topicName,
+                                subscriptionName,
+                                msg.EnqueuedTime,
+                                msg.Subject,
+                                props,
+                                body,
+                                msg.SequenceNumber));
+                        }
+
+                        try { await Task.Delay(1000, ct); }
+                        catch (OperationCanceledException) { return; }
                     }
                 }
-                catch (OperationCanceledException) { break; }
+                catch (OperationCanceledException) { return; }
                 catch (ServiceBusException ex)
                 {
                     _incomingErrors.Enqueue(new MonitoredError(
                         DateTimeOffset.Now, topicName, subscriptionName, ex.Message));
                     _needsRedraw = true;
-
-                    try { await Task.Delay(retryDelay, ct); }
-                    catch (OperationCanceledException) { break; }
-
-                    // Exponential backoff with cap
-                    retryDelay = Math.Min(retryDelay * 2, maxRetryDelay);
-                    continue;
                 }
                 catch (Exception ex)
                 {
@@ -260,14 +330,13 @@ internal static class Program
                     _needsRedraw = true;
                 }
 
-                try { await Task.Delay(1000, ct); }
-                catch (OperationCanceledException) { break; }
+                // Back off before creating a new receiver
+                try { await Task.Delay(retryDelay, ct); }
+                catch (OperationCanceledException) { return; }
+                retryDelay = Math.Min(retryDelay * 2, maxRetryDelay);
             }
         }
-        finally
-        {
-            await receiver.DisposeAsync();
-        }
+        catch (OperationCanceledException) { /* normal exit */ }
     }
 
     // ── UI loop ──────────────────────────────────────────────────────────────
@@ -314,9 +383,9 @@ internal static class Program
                         break;
                     default:
                     {
-                        var topicCount = _activeTopics.Count;
-                        var topicNames = string.Join(", ", _activeTopics.Keys.OrderBy(t => t));
-                        RenderList(topicCount, topicNames);
+                        var subCount = _activeSubscriptions.Count;
+                        var subNames = string.Join(", ", _activeSubscriptions.Keys.OrderBy(t => t));
+                        RenderList(subCount, subNames);
                         break;
                     }
                 }
@@ -404,7 +473,7 @@ internal static class Program
 
     // ── List view ────────────────────────────────────────────────────────────
 
-    static void RenderList(int topicCount, string topicNames)
+    static void RenderList(int subCount, string subNames)
     {
         var sb = new StringBuilder();
         var width  = Math.Max(SafeWindowWidth(), 80);
@@ -421,15 +490,15 @@ internal static class Program
         sb.AppendLine();
 
         // Info
-        if (topicCount == 0)
+        if (subCount == 0)
         {
-            sb.AppendLine($"  {BCyan("▶")} Waiting for topics to appear in config…");
-            sb.AppendLine($"    {Dim($"The config file is checked every {ConfigPollIntervalMs / 1000} seconds.")}");
+            sb.AppendLine($"  {BCyan("▶")} Discovering topics and subscriptions…");
+            sb.AppendLine($"    {Dim($"The management API is polled every {DiscoveryPollIntervalMs / 1000} seconds.")}");
         }
         else
         {
-            sb.AppendLine($"  {BCyan("▶")} Monitoring {Bold(topicCount.ToString())} topic(s) via {Bold($"'{MonitorSubscriptionName}'")} subscriptions");
-            sb.AppendLine($"    {Dim($"Topics: {topicNames}")}");
+            sb.AppendLine($"  {BCyan("▶")} Monitoring {Bold(subCount.ToString())} subscription(s)");
+            sb.AppendLine($"    {Dim($"Endpoints: {subNames}")}");
         }
         sb.AppendLine();
         sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Enter to view · e for errors · q or Esc to quit")}");

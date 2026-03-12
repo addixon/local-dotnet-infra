@@ -179,9 +179,11 @@ function Test-HealthEndpoint ([string]$Url) {
     <#
     Makes a lightweight HTTP GET from the host to the given URL.
     Returns $true on a 2xx response, $false on any error.
+    The timeout must exceed the proxy's internal emulator health-check
+    window (2 s per emulator, checked in parallel) to avoid 499 errors.
     #>
     try {
-        $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+        $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop
         return $true
     } catch {
         return $false
@@ -730,9 +732,13 @@ function Invoke-Monitor {
     Write-Success 'Monitor tool ready.'
     Write-Host ''
 
-    # The monitor reads Config.json for topic discovery and connects
-    # to the proxy's AMQP endpoint (same connection string as direct emulator)
-    & dotnet run --project $monitorProject -c Release --no-build -- $Script:ConfigFile
+    # The monitor discovers topics/subscriptions via the proxy's management API
+    # and connects to the AMQP endpoint for message peeking.
+    $mgmtPort = Get-HostPort 'local-servicebus-proxy' $sbDef.HealthPort
+    if (-not $mgmtPort) { $mgmtPort = '5300' }
+    $mgmtUrl  = "http://localhost:$mgmtPort"
+
+    & dotnet run --project $monitorProject -c Release --no-build -- $mgmtUrl $Script:ConfigFile
 }
 
 # ─── Usage ────────────────────────────────────────────────────────────────────
