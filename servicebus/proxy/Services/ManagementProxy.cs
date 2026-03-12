@@ -230,27 +230,42 @@ sealed class ManagementProxy
             return;
         }
 
-        // Forward the request to the backend
-        await ForwardRequestAsync(context, instance, path);
+        // Detect top-level topic/queue creation so we can create the monitor
+        // subscription BEFORE the client sees the 201 (avoids a race where the
+        // client publishes a message before the subscription exists).
+        var isTopLevelCreation = method == "PUT"
+            && ParseSubscriptionFromPath(path) is null
+            && ParseParentEntity(path) is null;
 
-        if (method == "PUT" && context.Response.StatusCode is 200 or 201)
+        if (isTopLevelCreation)
         {
-            var subInfo = ParseSubscriptionFromPath(path);
-            if (subInfo is not null)
+            var forwarded = await ForwardToBackendAsync(context, instance, path);
+
+            if (forwarded.StatusCode is 200 or 201)
             {
-                // Track subscription creation for discovery (emulator's
-                // subscription listing endpoint is broken, so the proxy
-                // maintains its own registry)
-                _router.RegisterSubscription(subInfo.Value.topic, subInfo.Value.subscription);
-                _logger.LogInformation("Registered subscription '{Topic}/{Sub}'",
-                    subInfo.Value.topic, subInfo.Value.subscription);
-            }
-            else if (ParseParentEntity(path) is null)
-            {
-                // Top-level topic created — auto-create a 'monitor'
-                // subscription so the monitor tool can peek messages
-                // immediately, before any application subscription exists.
+                // Auto-create 'monitor' subscription on the backend emulator
+                // before the client receives the response.
                 await CreateMonitorSubscriptionAsync(instance, entityName);
+            }
+
+            await WriteForwardedResponseAsync(context, forwarded);
+        }
+        else
+        {
+            await ForwardRequestAsync(context, instance, path);
+
+            if (method == "PUT" && context.Response.StatusCode is 200 or 201)
+            {
+                var subInfo = ParseSubscriptionFromPath(path);
+                if (subInfo is not null)
+                {
+                    // Track subscription creation for discovery (emulator's
+                    // subscription listing endpoint is broken, so the proxy
+                    // maintains its own registry)
+                    _router.RegisterSubscription(subInfo.Value.topic, subInfo.Value.subscription);
+                    _logger.LogInformation("Registered subscription '{Topic}/{Sub}'",
+                        subInfo.Value.topic, subInfo.Value.subscription);
+                }
             }
         }
     }
@@ -259,15 +274,19 @@ sealed class ManagementProxy
 
     const string MonitorSubscriptionName = "monitor";
 
+    /// <summary>
+    /// Creates the 'monitor' subscription via the ServiceBusAdministrationClient
+    /// SDK.  The SDK produces the required SAS auth headers; the request flows
+    /// SDK → proxy HTTPS:443 → emulator :5300.
+    ///
+    /// Called from the buffered topic-creation path so the subscription exists
+    /// BEFORE the 201 is returned to the client (prevents the race where the
+    /// client publishes a message before the subscription exists).
+    /// </summary>
     async Task CreateMonitorSubscriptionAsync(EmulatorInstance instance, string topicName)
     {
         try
         {
-            // Use the ServiceBusAdministrationClient via the proxy's own HTTPS
-            // endpoint.  The emulator's raw HTTP management API does not support
-            // subscription CRUD, but the SDK client produces the full set of
-            // headers (Authorization / SAS, User-Agent, etc.) that the emulator
-            // requires.  The request flows: SDK → proxy :443 → emulator :5300.
             var handler = new HttpClientHandler
             {
                 ServerCertificateCustomValidationCallback = (_, _, _, _) => true
@@ -304,7 +323,20 @@ sealed class ManagementProxy
 
     // ── HTTP forwarding ──────────────────────────────────────────────────────
 
-    async Task ForwardRequestAsync(HttpContext context, EmulatorInstance instance, string path)
+    /// <summary>Buffered response from a backend emulator.</summary>
+    sealed record ForwardedResponse(
+        int StatusCode,
+        List<KeyValuePair<string, string[]>> Headers,
+        string Body);
+
+    /// <summary>
+    /// Sends the incoming request to the backend emulator and returns the
+    /// response without writing it to the client.  Callers can inspect
+    /// the result (e.g. to create a monitor subscription on 201) before
+    /// flushing via <see cref="WriteForwardedResponseAsync"/>.
+    /// </summary>
+    async Task<ForwardedResponse> ForwardToBackendAsync(
+        HttpContext context, EmulatorInstance instance, string path)
     {
         var client = _httpFactory.CreateClient("management");
         var url    = $"http://{instance.ContainerName}:5300{path}{context.Request.QueryString}";
@@ -337,20 +369,38 @@ sealed class ManagementProxy
 
         var response = await client.SendAsync(request);
 
-        // Copy response
-        context.Response.StatusCode = (int)response.StatusCode;
-
-        foreach (var header in response.Headers)
-            context.Response.Headers[header.Key] = header.Value.ToArray();
-
-        foreach (var header in response.Content.Headers)
-            context.Response.Headers[header.Key] = header.Value.ToArray();
-
-        // Don't duplicate content-length
-        context.Response.Headers.Remove("Transfer-Encoding");
+        // Collect all response headers into a flat list
+        var headers = new List<KeyValuePair<string, string[]>>();
+        foreach (var h in response.Headers)
+            headers.Add(new(h.Key, h.Value.ToArray()));
+        foreach (var h in response.Content.Headers)
+            headers.Add(new(h.Key, h.Value.ToArray()));
 
         var responseBody = await response.Content.ReadAsStringAsync();
-        await context.Response.WriteAsync(responseBody);
+        return new ForwardedResponse((int)response.StatusCode, headers, responseBody);
+    }
+
+    /// <summary>Write a buffered <see cref="ForwardedResponse"/> to the client.</summary>
+    async Task WriteForwardedResponseAsync(HttpContext context, ForwardedResponse forwarded)
+    {
+        context.Response.StatusCode = forwarded.StatusCode;
+
+        foreach (var header in forwarded.Headers)
+            context.Response.Headers[header.Key] = header.Value;
+
+        context.Response.Headers.Remove("Transfer-Encoding");
+
+        await context.Response.WriteAsync(forwarded.Body);
+    }
+
+    /// <summary>
+    /// Convenience overload: forwards to the backend and writes the response
+    /// to the client in a single call (used for non-buffered paths).
+    /// </summary>
+    async Task ForwardRequestAsync(HttpContext context, EmulatorInstance instance, string path)
+    {
+        var forwarded = await ForwardToBackendAsync(context, instance, path);
+        await WriteForwardedResponseAsync(context, forwarded);
     }
 
     // ── Emulator timespan clamping ─────────────────────────────────────────
