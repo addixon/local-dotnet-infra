@@ -95,6 +95,15 @@ sealed class EmulatorOrchestrator : IAsyncDisposable
                 _router.Register(name, instance);
                 instance.EntityCount++;
             }
+
+            // Register subscriptions from config so the monitor can discover them
+            var ns = shard.UserConfig.Namespaces.FirstOrDefault();
+            if (ns is not null)
+            {
+                foreach (var topic in ns.Topics ?? [])
+                    foreach (var sub in topic.Subscriptions ?? [])
+                        _router.RegisterSubscription(topic.Name, sub.Name);
+            }
         }
 
         // Persist state

@@ -12,11 +12,43 @@ sealed class EntityRouter
     readonly ConcurrentDictionary<int, EmulatorInstance>    _shards = new();
     readonly object _lock = new();
 
+    // Subscription tracking — keyed by topic name (case-insensitive)
+    readonly ConcurrentDictionary<string, ConcurrentDictionary<string, bool>> _subscriptions = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Register an entity → emulator mapping.</summary>
     public void Register(string entityName, EmulatorInstance instance)
     {
         _routes[entityName] = instance;
         _shards[instance.ShardIndex] = instance;
+    }
+
+    /// <summary>Register a subscription under a topic.</summary>
+    public void RegisterSubscription(string topicName, string subscriptionName)
+    {
+        var subs = _subscriptions.GetOrAdd(topicName, _ => new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+        subs.TryAdd(subscriptionName, true);
+    }
+
+    /// <summary>Get all subscription names for a topic.</summary>
+    public IReadOnlyCollection<string> GetSubscriptions(string topicName)
+    {
+        if (_subscriptions.TryGetValue(topicName, out var subs))
+            return subs.Keys.ToList();
+        return [];
+    }
+
+    /// <summary>Get all topics with their subscriptions.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyCollection<string>> AllTopicsWithSubscriptions
+    {
+        get
+        {
+            var result = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entity in _routes.Keys)
+            {
+                result[entity] = GetSubscriptions(entity);
+            }
+            return result;
+        }
     }
 
     /// <summary>Look up the emulator instance hosting a given entity.</summary>

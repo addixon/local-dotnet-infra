@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Xml.Linq;
 using Azure.Messaging.ServiceBus;
 
 // ─── JSON configuration models ───────────────────────────────────────────────
@@ -23,6 +22,11 @@ sealed record SbTopic(
 
 sealed record SbSubscription(
     [property: JsonPropertyName("Name")] string Name);
+
+// Proxy entity registry response model
+sealed record ProxyEntity(
+    [property: JsonPropertyName("topic")]         string Topic,
+    [property: JsonPropertyName("subscriptions")] List<string> Subscriptions);
 
 // ─── Monitored message ──────────────────────────────────────────────────────
 
@@ -73,8 +77,6 @@ internal static class Program
     static readonly ConcurrentDictionary<string, bool> _activeSubscriptions = new();
     static string _managementUrl = "http://localhost:5300";
     static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
-    static readonly XNamespace Atom = "http://www.w3.org/2005/Atom";
-    static readonly XNamespace SbNs = "http://schemas.microsoft.com/netservices/2010/10/servicebus/connect";
 
     // ── ANSI helpers (mirrors stack.ps1 style) ───────────────────────────────
 
@@ -186,13 +188,12 @@ internal static class Program
         {
             try
             {
-                var topics = await GetTopicNamesAsync(ct);
-                foreach (var topic in topics)
+                var entities = await GetEntitiesAsync(ct);
+                foreach (var entity in entities)
                 {
-                    var subs = await GetSubscriptionNamesAsync(topic, ct);
-                    foreach (var sub in subs)
+                    foreach (var sub in entity.Subscriptions)
                     {
-                        StartMonitoring(client, topic, sub, ct);
+                        StartMonitoring(client, entity.Topic, sub, ct);
                     }
                 }
             }
@@ -209,41 +210,10 @@ internal static class Program
         }
     }
 
-    static async Task<List<string>> GetTopicNamesAsync(CancellationToken ct)
+    static async Task<List<ProxyEntity>> GetEntitiesAsync(CancellationToken ct)
     {
-        var names = new List<string>();
-        var resp  = await _httpClient.GetStringAsync($"{_managementUrl}/$Resources/Topics", ct);
-        try
-        {
-            var doc = XDocument.Parse(resp);
-            foreach (var entry in doc.Descendants(Atom + "entry"))
-            {
-                var title = entry.Element(Atom + "title")?.Value;
-                if (!string.IsNullOrWhiteSpace(title))
-                    names.Add(title);
-            }
-        }
-        catch { /* non-XML response */ }
-        return names;
-    }
-
-    static async Task<List<string>> GetSubscriptionNamesAsync(string topicName, CancellationToken ct)
-    {
-        var names = new List<string>();
-        try
-        {
-            var resp = await _httpClient.GetStringAsync(
-                $"{_managementUrl}/{Uri.EscapeDataString(topicName)}/Subscriptions", ct);
-            var doc = XDocument.Parse(resp);
-            foreach (var entry in doc.Descendants(Atom + "entry"))
-            {
-                var title = entry.Element(Atom + "title")?.Value;
-                if (!string.IsNullOrWhiteSpace(title))
-                    names.Add(title);
-            }
-        }
-        catch { /* topic may not have subscriptions yet */ }
-        return names;
+        var json = await _httpClient.GetStringAsync($"{_managementUrl}/_proxy/entities", ct);
+        return JsonSerializer.Deserialize<List<ProxyEntity>>(json) ?? [];
     }
 
     static void StartMonitoring(ServiceBusClient client, string topicName, string subName, CancellationToken ct)
@@ -485,7 +455,7 @@ internal static class Program
         sb.AppendLine();
         var bar = new string('─', 53);
         sb.AppendLine($"  {BCyan($"╭{bar}╮")}");
-        sb.AppendLine($"  {BCyan("│")}    {BWhite("local-infrastructure")}  {Dim("·  Service Bus Monitor")}    {BCyan("│")}");
+        sb.AppendLine($"  {BCyan("│")}    {BWhite("local-infrastructure")}  {Dim("·  Service Bus Monitor")}     {BCyan("│")}");
         sb.AppendLine($"  {BCyan($"╰{bar}╯")}");
         sb.AppendLine();
 
@@ -667,7 +637,7 @@ internal static class Program
         sb.AppendLine();
         var bar = new string('─', 53);
         sb.AppendLine($"  {BRed($"╭{bar}╮")}");
-        sb.AppendLine($"  {BRed("│")}    {BWhite("local-infrastructure")}  {Dim("·  Errors")}                 {BRed("│")}");
+        sb.AppendLine($"  {BRed("│")}    {BWhite("local-infrastructure")}  {Dim("·  Errors")}                  {BRed("│")}");
         sb.AppendLine($"  {BRed($"╰{bar}╯")}");
         sb.AppendLine();
         sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Esc to return · q to quit")}");

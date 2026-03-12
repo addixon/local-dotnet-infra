@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
+using Azure.Messaging.ServiceBus.Administration;
 using ServiceBusProxy.Models;
 
 namespace ServiceBusProxy.Services;
@@ -56,6 +57,13 @@ sealed class ManagementProxy
             if (path.Equals("/_proxy/status", StringComparison.OrdinalIgnoreCase))
             {
                 await HandleProxyStatusAsync(context);
+                return;
+            }
+
+            // Entity registry — topics with their subscriptions (for the monitor)
+            if (path.Equals("/_proxy/entities", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleEntitiesAsync(context);
                 return;
             }
 
@@ -114,6 +122,21 @@ sealed class ManagementProxy
             maxPerEmulator = ConfigShardManager.MaxEntitiesPerEmulator,
             emulators      = details
         });
+    }
+
+    // ── Entity registry (for monitor discovery) ──────────────────────────────
+
+    async Task HandleEntitiesAsync(HttpContext context)
+    {
+        var topics = _router.AllTopicsWithSubscriptions;
+        var result = topics.Select(kvp => new
+        {
+            topic         = kvp.Key,
+            subscriptions = kvp.Value
+        });
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(result);
     }
 
     // ── Aggregate list operations ────────────────────────────────────────────
@@ -188,7 +211,6 @@ sealed class ManagementProxy
         {
             _logger.LogInformation("Dynamic entity creation: '{Entity}' via management API", entityName);
 
-            // Determine entity type from path
             var entityType = DetermineEntityType(path);
             instance = await _orchestrator.EnsureCapacityAsync(entityName, entityType);
         }
@@ -210,6 +232,74 @@ sealed class ManagementProxy
 
         // Forward the request to the backend
         await ForwardRequestAsync(context, instance, path);
+
+        if (method == "PUT" && context.Response.StatusCode is 200 or 201)
+        {
+            var subInfo = ParseSubscriptionFromPath(path);
+            if (subInfo is not null)
+            {
+                // Track subscription creation for discovery (emulator's
+                // subscription listing endpoint is broken, so the proxy
+                // maintains its own registry)
+                _router.RegisterSubscription(subInfo.Value.topic, subInfo.Value.subscription);
+                _logger.LogInformation("Registered subscription '{Topic}/{Sub}'",
+                    subInfo.Value.topic, subInfo.Value.subscription);
+            }
+            else if (ParseParentEntity(path) is null)
+            {
+                // Top-level topic created — auto-create a 'monitor'
+                // subscription so the monitor tool can peek messages
+                // immediately, before any application subscription exists.
+                await CreateMonitorSubscriptionAsync(instance, entityName);
+            }
+        }
+    }
+
+    // ── Auto-create monitor subscription ─────────────────────────────────────
+
+    const string MonitorSubscriptionName = "monitor";
+
+    async Task CreateMonitorSubscriptionAsync(EmulatorInstance instance, string topicName)
+    {
+        try
+        {
+            // Use the ServiceBusAdministrationClient via the proxy's own HTTPS
+            // endpoint.  The emulator's raw HTTP management API does not support
+            // subscription CRUD, but the SDK client produces the full set of
+            // headers (Authorization / SAS, User-Agent, etc.) that the emulator
+            // requires.  The request flows: SDK → proxy :443 → emulator :5300.
+            var handler = new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+            };
+            var options = new ServiceBusAdministrationClientOptions();
+            options.Transport = new Azure.Core.Pipeline.HttpClientTransport(handler);
+
+            // Omit UseDevelopmentEmulator so the SDK connects via HTTPS:443
+            // (the proxy's own listener) instead of HTTP:80.
+            var connStr =
+                "Endpoint=sb://localhost;" +
+                "SharedAccessKeyName=RootManageSharedAccessKey;" +
+                "SharedAccessKey=SAS_KEY_VALUE;";
+
+            var adminClient = new ServiceBusAdministrationClient(connStr, options);
+            await adminClient.CreateSubscriptionAsync(
+                new CreateSubscriptionOptions(topicName, MonitorSubscriptionName)
+                {
+                    LockDuration             = TimeSpan.FromSeconds(30),
+                    DefaultMessageTimeToLive = TimeSpan.FromHours(1),
+                    MaxDeliveryCount         = 1
+                });
+
+            _router.RegisterSubscription(topicName, MonitorSubscriptionName);
+            _logger.LogInformation("Auto-created '{Sub}' subscription on '{Topic}'",
+                MonitorSubscriptionName, topicName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error auto-creating '{Sub}' subscription on '{Topic}'",
+                MonitorSubscriptionName, topicName);
+        }
     }
 
     // ── HTTP forwarding ──────────────────────────────────────────────────────
@@ -237,7 +327,11 @@ sealed class ManagementProxy
             if (context.Request.Method == "PUT")
                 body = ClampTimespanProperties(body);
 
-            request.Content = new StringContent(body, Encoding.UTF8,
+            // Use ByteArrayContent to avoid StringContent rejecting complex
+            // media types like "application/atom+xml;type=entry;charset=utf-8"
+            var bytes = Encoding.UTF8.GetBytes(body);
+            request.Content = new ByteArrayContent(bytes);
+            request.Content.Headers.TryAddWithoutValidation("Content-Type",
                 context.Request.ContentType ?? "application/xml");
         }
 
@@ -350,5 +444,18 @@ sealed class ManagementProxy
         if (path.Contains("Subscriptions", StringComparison.OrdinalIgnoreCase)) return "topic";
         if (path.Contains("Queue", StringComparison.OrdinalIgnoreCase)) return "queue";
         return "topic";
+    }
+
+    /// <summary>
+    /// Parse topic and subscription names from a subscription management path.
+    /// /my-topic/Subscriptions/sub-1 → (my-topic, sub-1)
+    /// </summary>
+    static (string topic, string subscription)? ParseSubscriptionFromPath(string path)
+    {
+        var trimmed = path.TrimStart('/');
+        var parts = trimmed.Split('/');
+        if (parts.Length >= 3 && parts[1].Equals("Subscriptions", StringComparison.OrdinalIgnoreCase))
+            return (parts[0], parts[2]);
+        return null;
     }
 }
