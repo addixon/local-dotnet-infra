@@ -26,7 +26,7 @@ A Docker-based local development stack providing **MS SQL Server 2025**, **Postg
 |---|---|---|
 | MS SQL Server 2025 (Developer) | `mcr.microsoft.com/mssql/server:2025-latest` | `1433` |
 | PostgreSQL 16 | `postgres:16-alpine` | `5432` |
-| Service Bus Emulator Proxy | `.NET 10 (custom)` | `5672` (AMQP), `5300` (management/health) |
+| Service Bus Emulator Proxy | `.NET 10 (custom)` | `5672` (AMQP), `5300` (management/health), `443` (HTTPS admin) |
 
 The **Service Bus Emulator Proxy** transparently shards topics and queues across multiple Azure Service Bus Emulator instances (50 entities per emulator). Applications connect to a single AMQP + HTTP endpoint and are unaware of the underlying sharding. The proxy dynamically spins up additional emulators as needed.
 
@@ -159,16 +159,23 @@ POSTGRES_DB=<REPLACE_WITH_DATABASE_NAME>
 # Host port to expose PostgreSQL on (default: 5432)
 POSTGRES_PORT=5432
 
-# ─── Azure Service Bus Emulator ──────────────────────────────────────────────
-# SA password for the internal SQL Server used by the Service Bus emulator.
+# ─── Azure Service Bus Emulator Proxy ────────────────────────────────────────
+# SA password for the SQL Server instances used by each Service Bus emulator.
 # Must meet the same SQL Server complexity requirements as MSSQL_SA_PASSWORD.
 SERVICEBUS_SQL_PASSWORD=<REPLACE_WITH_YOUR_PASSWORD>
 
 # Host port to expose the Service Bus AMQP endpoint on (default: 5672)
+# Applications connect to this port — the proxy routes to backend emulators.
 SERVICEBUS_PORT=5672
 
 # Host port to expose the Service Bus management/health endpoint on (default: 5300)
-SERVICEBUS_MGMT_PORT=5300
+# The proxy aggregates health and management API from all backend emulators.
+SERVICEBUS_MGMT_PORT=80
+
+# Host port to expose the Service Bus HTTPS admin endpoint on (default: 443)
+# The ServiceBusAdministrationClient (used by MassTransit etc.) connects here.
+# A self-signed TLS certificate is generated at proxy startup.
+SERVICEBUS_ADMIN_PORT=443
 ```
 
 ---
@@ -209,11 +216,9 @@ Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAcce
 
 Copy `servicebus/Config.example.json` to `servicebus/Config.json` (if you haven't already) and edit it to define the namespace, queues, and topics the emulator exposes. The config file uses the same format as the Azure Service Bus Emulator's `Config.json`, but **you can define more than 50 entities** — the proxy will automatically shard them across multiple emulator instances.
 
-The example configuration ships with one queue (`queue.1`) and ten topics with subscriptions.
+The example configuration ships with one topic (`topic.1`) and one subscription.
 
-> **Important** — Every topic must include a `monitor` subscription. The Service Bus monitor tool (`.\stack.ps1 monitor`) uses this subscription exclusively so that monitoring does not interfere with your application's own subscriptions. If a topic is missing the `monitor` subscription, the monitor will log errors to stderr and retry with exponential backoff until the subscription becomes available.
-
-**Never commit `servicebus/Config.json`** — it is listed in `.gitignore`, just like `.env`. The example file (`Config.example.json`) is the safe-to-commit template.
+**Never commit `servicebus/Config.json`**
 
 Restart the stack after editing the config file: `.\stack.ps1 restart`
 
@@ -230,7 +235,7 @@ The proxy (`servicebus/proxy/`) is a .NET 10 application that sits between your 
 │  Your Application                   │
 │  (Azure.Messaging.ServiceBus SDK)   │
 └──────────┬──────────────────────────┘
-           │  AMQP (5672) + HTTP (5300)
+           │  AMQP (5672) + HTTP (5300) + HTTPS (443)
            ▼
 ┌─────────────────────────────────────┐
 │  ServiceBus Emulator Proxy          │
@@ -254,7 +259,8 @@ The proxy (`servicebus/proxy/`) is a .NET 10 application that sits between your 
 2. For each group, it creates a SQL Server container and a Service Bus Emulator container (via the Docker API)
 3. It starts an **AMQP server** on port 5672 that routes messages to the correct backend emulator
 4. It starts an **HTTP server** on port 5300 that aggregates the management API and health endpoint
-5. **Dynamic scaling**: if an application creates a topic via the management API that would exceed an emulator's capacity, the proxy spins up a new emulator
+5. It starts an **HTTPS server** on port 443 so that `ServiceBusAdministrationClient` (used by MassTransit and similar libraries) can connect transparently — a self-signed TLS certificate is generated at startup (or a trusted cert mounted from the host by `stack.ps1`)
+6. **Dynamic scaling**: if an application creates a topic via the management API that would exceed an emulator's capacity, the proxy spins up a new emulator
 
 ### Proxy endpoints
 
@@ -262,6 +268,8 @@ The proxy (`servicebus/proxy/`) is a .NET 10 application that sits between your 
 |---|---|
 | `http://localhost:5300/health` | Aggregate health of all emulators |
 | `http://localhost:5300/_proxy/status` | Detailed proxy status (shard count, entity count, per-emulator health) |
+| `http://localhost:5300/_proxy/entities` | Entity registry — lists all topics with their subscriptions (used by the monitor) |
+| `https://localhost:443/...` | HTTPS admin endpoint for `ServiceBusAdministrationClient` (e.g. MassTransit topology creation) |
 
 ### Entity limit
 
@@ -293,9 +301,9 @@ dotnet run
 
 ### How it works
 
-- **Auto-discovers** topics and subscriptions from `servicebus/Config.json` (the master config with all topics across all emulators).
+- **Auto-discovers** topics and subscriptions dynamically via the proxy's management API (`/_proxy/entities`), with optional seeding from `servicebus/Config.json` for backwards compatibility.
 - **Peeks** messages without consuming them, so your application's subscribers are unaffected.
-- Uses a dedicated `monitor` subscription on each topic (see [Customising Service Bus queues and topics](#customising-service-bus-queues-and-topics)).
+- Monitors all subscriptions discovered from the proxy — no dedicated subscription required.
 - Provides keyboard navigation to browse messages across topics.
 - Retries with exponential backoff if the Service Bus proxy is not yet available.
 - Caps in-memory message storage at 1,000 messages to prevent memory exhaustion.
@@ -401,15 +409,18 @@ If your application can't connect:
 ├── docs/
 │   ├── FUTURE-MULTIPLEXING.md    # Spec for full AMQP connection multiplexing
 │   └── FUTURE-ASYNC-SPINUP.md   # Spec for async emulator spin-up
+├── test-amqp/                # AMQP test client
+│   └── Program.cs
 └── servicebus/
     ├── Config.example.json   # Safe-to-commit template — copy to Config.json and customise
     ├── emulator-configs/     # Auto-generated per-emulator config shards (gitignored)
+    ├── proxy-cert/           # TLS certificate for HTTPS admin endpoint (generated by stack.ps1, gitignored)
     ├── monitor/
     │   ├── Program.cs                # Interactive Service Bus message monitor (.NET 8 TUI)
     │   └── ServiceBusMonitor.csproj  # .NET 8 project file
     └── proxy/
         ├── Dockerfile                # Container image for the proxy
-        ├── Program.cs                # Entry point — wires AMQP + HTTP proxy
+        ├── Program.cs                # Entry point — wires AMQP + HTTP + HTTPS proxy
         ├── ServiceBusProxy.csproj    # .NET 10 project file
         ├── Models/
         │   └── ProxyConfig.cs        # Config, state, and runtime models
