@@ -35,6 +35,12 @@ sealed record MonitoredMessage(
     string Body,
     long SequenceNumber);
 
+sealed record MonitoredError(
+    DateTimeOffset Timestamp,
+    string TopicName,
+    string SubscriptionName,
+    string Message);
+
 // ─── Program ─────────────────────────────────────────────────────────────────
 
 internal static class Program
@@ -46,10 +52,20 @@ internal static class Program
     const int MaxMessageCount = 1000; // Cap to prevent memory exhaustion
     static int _selectedIndex;
     static int _scrollOffset;
-    static bool _showingDetail;
-    static int _detailScrollOffset;
     static bool _needsRedraw = true;
     static readonly CancellationTokenSource _cts = new();
+
+    // Error tracking — errors go to an in-memory list instead of stderr
+    static readonly ConcurrentQueue<MonitoredError> _incomingErrors = new();
+    static readonly List<MonitoredError> _errors = new();
+    const int MaxErrorCount = 500;
+    static int _errorSelectedIndex;
+    static int _errorScrollOffset;
+
+    // View state
+    enum ViewMode { Messages, Detail, Errors }
+    static ViewMode _view = ViewMode.Messages;
+    static int _detailScrollOffset;
 
     // Dynamic subscription tracking — only the well-known "monitor" subscription is used
     const string MonitorSubscriptionName = "monitor";
@@ -65,6 +81,8 @@ internal static class Program
     static string BCyan(string t)   => C("1;36", t);
     static string BWhite(string t)  => C("1;97", t);
     static string BYellow(string t) => C("1;33", t);
+    static string BRed(string t)    => C("1;31", t);
+    static string Red(string t)     => C("31",   t);
 
     // ── Entry point ──────────────────────────────────────────────────────────
 
@@ -135,7 +153,9 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[monitor] Failed to read config {configPath}: {ex.Message}");
+            _incomingErrors.Enqueue(new MonitoredError(
+                DateTimeOffset.Now, "(config)", configPath, $"Failed to read config: {ex.Message}"));
+            _needsRedraw = true;
             return;
         }
 
@@ -222,8 +242,9 @@ internal static class Program
                 catch (OperationCanceledException) { break; }
                 catch (ServiceBusException ex)
                 {
-                    // Log Service Bus errors (e.g. connection lost, unauthorized) and back off
-                    Console.Error.WriteLine($"[monitor] Service Bus error on {topicName}/{subscriptionName}: {ex.Message} (retrying in {retryDelay / 1000}s)");
+                    _incomingErrors.Enqueue(new MonitoredError(
+                        DateTimeOffset.Now, topicName, subscriptionName, ex.Message));
+                    _needsRedraw = true;
 
                     try { await Task.Delay(retryDelay, ct); }
                     catch (OperationCanceledException) { break; }
@@ -234,8 +255,9 @@ internal static class Program
                 }
                 catch (Exception ex)
                 {
-                    // Unexpected error — surface once via stderr, then continue polling
-                    Console.Error.WriteLine($"[monitor] Error polling {topicName}/{subscriptionName}: {ex.Message}");
+                    _incomingErrors.Enqueue(new MonitoredError(
+                        DateTimeOffset.Now, topicName, subscriptionName, ex.Message));
+                    _needsRedraw = true;
                 }
 
                 try { await Task.Delay(1000, ct); }
@@ -254,15 +276,21 @@ internal static class Program
     {
         while (!_cts.Token.IsCancellationRequested)
         {
-            // Drain incoming queue
+            // Drain incoming messages
             while (_incoming.TryDequeue(out var msg))
             {
                 _messages.Insert(0, msg); // newest first
-
-                // Cap list size to prevent memory exhaustion
                 if (_messages.Count > MaxMessageCount)
                     _messages.RemoveAt(_messages.Count - 1);
+                _needsRedraw = true;
+            }
 
+            // Drain incoming errors
+            while (_incomingErrors.TryDequeue(out var err))
+            {
+                _errors.Insert(0, err); // newest first
+                if (_errors.Count > MaxErrorCount)
+                    _errors.RemoveAt(_errors.Count - 1);
                 _needsRedraw = true;
             }
 
@@ -276,13 +304,21 @@ internal static class Program
             // Render
             if (_needsRedraw)
             {
-                if (_showingDetail)
-                    RenderDetail();
-                else
+                switch (_view)
                 {
-                    var topicCount = _activeTopics.Count;
-                    var topicNames = string.Join(", ", _activeTopics.Keys.OrderBy(t => t));
-                    RenderList(topicCount, topicNames);
+                    case ViewMode.Detail:
+                        RenderDetail();
+                        break;
+                    case ViewMode.Errors:
+                        RenderErrors();
+                        break;
+                    default:
+                    {
+                        var topicCount = _activeTopics.Count;
+                        var topicNames = string.Join(", ", _activeTopics.Keys.OrderBy(t => t));
+                        RenderList(topicCount, topicNames);
+                        break;
+                    }
                 }
                 _needsRedraw = false;
             }
@@ -304,44 +340,65 @@ internal static class Program
             return;
         }
 
-        if (_showingDetail)
+        switch (_view)
         {
-            switch (key.Key)
-            {
-                case ConsoleKey.Escape:
-                    _showingDetail = false;
-                    _detailScrollOffset = 0;
-                    break;
-                case ConsoleKey.UpArrow:
-                    _detailScrollOffset = Math.Max(0, _detailScrollOffset - 1);
-                    break;
-                case ConsoleKey.DownArrow:
-                    _detailScrollOffset++;
-                    break;
-            }
-        }
-        else
-        {
-            switch (key.Key)
-            {
-                case ConsoleKey.Escape:
-                    _cts.Cancel();
-                    return;
-                case ConsoleKey.UpArrow:
-                    _selectedIndex = Math.Max(0, _selectedIndex - 1);
-                    break;
-                case ConsoleKey.DownArrow:
-                    if (_messages.Count > 0)
-                        _selectedIndex = Math.Min(_messages.Count - 1, _selectedIndex + 1);
-                    break;
-                case ConsoleKey.Enter:
-                    if (_messages.Count > 0 && _selectedIndex < _messages.Count)
-                    {
-                        _showingDetail = true;
+            case ViewMode.Detail:
+                switch (key.Key)
+                {
+                    case ConsoleKey.Escape:
+                        _view = ViewMode.Messages;
                         _detailScrollOffset = 0;
-                    }
-                    break;
-            }
+                        break;
+                    case ConsoleKey.UpArrow:
+                        _detailScrollOffset = Math.Max(0, _detailScrollOffset - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        _detailScrollOffset++;
+                        break;
+                }
+                break;
+
+            case ViewMode.Errors:
+                switch (key.Key)
+                {
+                    case ConsoleKey.Escape:
+                        _view = ViewMode.Messages;
+                        break;
+                    case ConsoleKey.UpArrow:
+                        _errorSelectedIndex = Math.Max(0, _errorSelectedIndex - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        if (_errors.Count > 0)
+                            _errorSelectedIndex = Math.Min(_errors.Count - 1, _errorSelectedIndex + 1);
+                        break;
+                }
+                break;
+
+            default: // Messages
+                switch (key.Key)
+                {
+                    case ConsoleKey.Escape:
+                        _cts.Cancel();
+                        return;
+                    case ConsoleKey.UpArrow:
+                        _selectedIndex = Math.Max(0, _selectedIndex - 1);
+                        break;
+                    case ConsoleKey.DownArrow:
+                        if (_messages.Count > 0)
+                            _selectedIndex = Math.Min(_messages.Count - 1, _selectedIndex + 1);
+                        break;
+                    case ConsoleKey.Enter:
+                        if (_messages.Count > 0 && _selectedIndex < _messages.Count)
+                        {
+                            _view = ViewMode.Detail;
+                            _detailScrollOffset = 0;
+                        }
+                        break;
+                }
+                // 'e' / 'E' to toggle errors view
+                if (key.KeyChar is 'e' or 'E')
+                    _view = ViewMode.Errors;
+                break;
         }
     }
 
@@ -375,12 +432,12 @@ internal static class Program
             sb.AppendLine($"    {Dim($"Topics: {topicNames}")}");
         }
         sb.AppendLine();
-        sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Enter to view · q or Esc to quit")}");
+        sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Enter to view · e for errors · q or Esc to quit")}");
         sb.AppendLine();
 
         // Column headers
         const int colTime  = 22;
-        const int colTopic = 20;
+        const int colTopic = 40;
         const int colSub   = 20;
         sb.Append("  ");
         sb.Append(Dim("  RECEIVED".PadRight(colTime)));
@@ -429,7 +486,10 @@ internal static class Program
 
         // Footer
         sb.AppendLine();
-        sb.AppendLine($"  {Dim($"{_messages.Count} message(s) received")}");
+        var errorHint = _errors.Count > 0
+            ? $"  ·  {BRed($"{_errors.Count} error(s)")} {Dim("(press e)")}"
+            : "";
+        sb.AppendLine($"  {Dim($"{_messages.Count} message(s) received")}{errorHint}");
 
         Console.Write(sb.ToString());
     }
@@ -520,6 +580,77 @@ internal static class Program
             var to   = Math.Min(_detailScrollOffset + availableLines, lines.Count);
             sb.AppendLine($"    {Dim($"↑↓ to scroll · Lines {from}–{to} of {lines.Count}")}");
         }
+
+        Console.Write(sb.ToString());
+    }
+
+    // ── Errors view ─────────────────────────────────────────────────────────
+
+    static void RenderErrors()
+    {
+        var sb = new StringBuilder();
+        var width  = Math.Max(SafeWindowWidth(), 80);
+        var height = Math.Max(SafeWindowHeight(), 24);
+
+        sb.Append("\x1b[H\x1b[J"); // home + clear
+
+        // Banner
+        sb.AppendLine();
+        var bar = new string('─', 53);
+        sb.AppendLine($"  {BRed($"╭{bar}╮")}");
+        sb.AppendLine($"  {BRed("│")}    {BWhite("local-infrastructure")}  {Dim("·  Errors")}                 {BRed("│")}");
+        sb.AppendLine($"  {BRed($"╰{bar}╯")}");
+        sb.AppendLine();
+        sb.AppendLine($"    {Dim("Use ↑↓ to navigate · Esc to return · q to quit")}");
+        sb.AppendLine();
+
+        // Column headers
+        const int colTime  = 22;
+        const int colTopic = 40;
+        sb.Append("  ");
+        sb.Append(Dim("  TIME".PadRight(colTime)));
+        sb.Append(Dim("TOPIC / SUBSCRIPTION".PadRight(colTopic)));
+        sb.AppendLine(Dim("ERROR"));
+        sb.AppendLine($"  {Dim(new string('─', Math.Min(width - 4, 120)))}");
+
+        const int headerLines = 10;
+        var availableLines = height - headerLines - 3;
+
+        if (_errors.Count == 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"    {Dim("No errors recorded.")}");
+        }
+        else
+        {
+            _errorSelectedIndex = Math.Clamp(_errorSelectedIndex, 0, _errors.Count - 1);
+
+            if (_errorSelectedIndex < _errorScrollOffset)
+                _errorScrollOffset = _errorSelectedIndex;
+            if (_errorSelectedIndex >= _errorScrollOffset + availableLines)
+                _errorScrollOffset = _errorSelectedIndex - availableLines + 1;
+
+            var visible = _errors.Skip(_errorScrollOffset).Take(availableLines).ToList();
+            for (var i = 0; i < visible.Count; i++)
+            {
+                var err = visible[i];
+                var idx = _errorScrollOffset + i;
+                var selected = idx == _errorSelectedIndex;
+
+                var time    = err.Timestamp.LocalDateTime.ToString("HH:mm:ss.fff");
+                var entity  = Truncate($"{err.TopicName}/{err.SubscriptionName}", colTopic - 2);
+                var errMsg  = Truncate(err.Message, Math.Max(20, width - colTime - colTopic - 8));
+
+                var ptr  = selected ? BRed("▸") : " ";
+                var line = $"  {ptr} {time.PadRight(colTime - 2)}{entity.PadRight(colTopic)}{Red(errMsg)}";
+
+                sb.AppendLine(selected ? Bold(line) : line);
+            }
+        }
+
+        // Footer
+        sb.AppendLine();
+        sb.AppendLine($"  {Dim($"{_errors.Count} error(s) recorded")}");
 
         Console.Write(sb.ToString());
     }

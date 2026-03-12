@@ -9,7 +9,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview
 WORKDIR /app
 COPY --from=build /app .
 
-# Proxy listens on AMQP (5672) and HTTP management (5300)
-EXPOSE 5672 5300
+# Proxy listens on AMQP (5672), HTTP management (5300), and HTTPS admin (443)
+EXPOSE 5672 5300 443
 
 ENTRYPOINT ["dotnet", "ServiceBusProxy.dll"]

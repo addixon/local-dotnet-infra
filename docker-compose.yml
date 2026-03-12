@@ -77,9 +77,11 @@ services:
     ports:
       - "${SERVICEBUS_PORT:-5672}:5672"
       - "${SERVICEBUS_MGMT_PORT:-5300}:5300"
+      - "${SERVICEBUS_ADMIN_PORT:-443}:443"
     volumes:
       - ./servicebus/Config.json:/config/Config.json:ro
       - ./servicebus/emulator-configs:/emulator-configs
+      - ./servicebus/proxy-cert:/cert:ro
       - servicebus_proxy_state:/state
       - /var/run/docker.sock:/var/run/docker.sock
     # NOTE: Health is verified externally by stack.ps1 via the /health HTTP

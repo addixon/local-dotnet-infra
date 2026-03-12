@@ -136,7 +136,9 @@ function script:Spin ([string]$Msg) {
     $f = $Script:SpinFrames[$Script:SpinIdx % $Script:SpinFrames.Count]
     $Script:SpinIdx++
     if ($Script:UseAnsi) {
-        Write-Host "`r    $(Cyan $f) $Msg   " -NoNewline
+        # \e[0K = erase from cursor to end of line (prevents leftover characters
+        # when the message shrinks, e.g. fewer pending services)
+        Write-Host "`r    $(Cyan $f) $Msg${ESC}[0K" -NoNewline
     }
 }
 
@@ -407,6 +409,49 @@ function Assert-ConfigFile {
     }
 }
 
+function Assert-ProxyCert {
+    # Generates a self-signed TLS certificate for the HTTPS admin endpoint
+    # (port 443) and imports it into the current user's trusted root store so
+    # applications (e.g. MassTransit's ServiceBusAdministrationClient) can
+    # connect without TLS errors.  The cert is reused across restarts.
+    $certDir = Join-Path (Join-Path $PSScriptRoot 'servicebus') 'proxy-cert'
+    $pfxPath = Join-Path $certDir 'localhost.pfx'
+    $cerPath = Join-Path $certDir 'localhost.cer'
+
+    if (-not (Test-Path $certDir)) {
+        $null = New-Item -ItemType Directory -Path $certDir -Force
+    }
+
+    if (Test-Path $pfxPath) { return }
+
+    Write-Step 'Generating TLS certificate for HTTPS admin endpoint…'
+
+    # Generate a self-signed cert valid for 5 years
+    $cert = New-SelfSignedCertificate `
+        -DnsName 'localhost' `
+        -CertStoreLocation 'Cert:\CurrentUser\My' `
+        -NotAfter (Get-Date).AddYears(5) `
+        -FriendlyName 'ServiceBus Emulator Proxy (localhost)' `
+        -KeyExportPolicy Exportable `
+        -KeyLength 2048 `
+        -HashAlgorithm SHA256
+
+    # Export PFX (with private key) for the proxy container
+    $pw = ConvertTo-SecureString -String 'dev' -Force -AsPlainText
+    $null = Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $pw
+
+    # Export public cert for trust import
+    $null = Export-Certificate -Cert $cert -FilePath $cerPath -Type CERT
+
+    # Remove from the personal store (it was only needed for export)
+    Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+
+    # Import into the current user's trusted root store
+    Write-Step 'Importing certificate into trusted root store (you may see a confirmation dialog)…'
+    $null = Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\CurrentUser\Root'
+    Write-Success 'TLS certificate created and trusted.'
+}
+
 # ─── Actions ──────────────────────────────────────────────────────────────────
 
 function Invoke-Start {
@@ -424,7 +469,15 @@ function Invoke-Start {
 
     Write-Step 'Bringing up services (docker compose up -d)…'
     Write-Host ''
-    $rc = Invoke-Compose 'up', '-d', '--remove-orphans'
+    # Capture all output (docker compose sends progress to stderr) and filter out
+    # structured-log warnings like: time="..." level=warning msg="No services to build"
+    $composeOutput = & docker compose --file $Script:ComposeFile up -d --remove-orphans 2>&1
+    $rc = $LASTEXITCODE
+    foreach ($line in $composeOutput) {
+        $text = "$line"
+        if ($text -match '^time=.*level=') { continue }
+        Write-Host $text
+    }
     if ($rc -ne 0) {
         Write-Host ''
         Write-Fail "docker compose up failed (exit code $rc)."
@@ -509,7 +562,13 @@ function Invoke-Restart {
 
     Write-Step 'Starting containers…'
     Write-Host ''
-    $rc = Invoke-Compose 'up', '-d', '--remove-orphans'
+    $composeOutput = & docker compose --file $Script:ComposeFile up -d --remove-orphans 2>&1
+    $rc = $LASTEXITCODE
+    foreach ($line in $composeOutput) {
+        $text = "$line"
+        if ($text -match '^time=.*level=') { continue }
+        Write-Host $text
+    }
     if ($rc -ne 0) {
         Write-Host ''
         Write-Fail "docker compose up failed (exit code $rc)."
@@ -710,9 +769,9 @@ if (-not $Action) {
 Assert-Docker
 
 switch ($Action.ToLower()) {
-    'start'   { Assert-EnvFile; Assert-ConfigFile; Invoke-Start              }
-    'stop'    {                                    Invoke-Stop               }
-    'restart' { Assert-EnvFile; Assert-ConfigFile; Invoke-Restart            }
+    'start'   { Assert-EnvFile; Assert-ConfigFile; Assert-ProxyCert; Invoke-Start   }
+    'stop'    {                                                      Invoke-Stop    }
+    'restart' { Assert-EnvFile; Assert-ConfigFile; Assert-ProxyCert; Invoke-Restart }
     'nuke'    {                                    Invoke-Nuke               }
     'status'  {                                    Invoke-Status             }
     'logs'    {                                    Invoke-Logs $Service      }

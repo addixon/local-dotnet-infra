@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using ServiceBusProxy.Services;
 
 // ─── ServiceBus Emulator Proxy ───────────────────────────────────────────────
@@ -17,8 +19,26 @@ var emulatorConfigDir = Environment.GetEnvironmentVariable("EMULATOR_CONFIG_DIR"
 var proxyMgmtPort    = Environment.GetEnvironmentVariable("PROXY_MGMT_PORT")         ?? "5300";
 var proxyAmqpPort    = Environment.GetEnvironmentVariable("PROXY_AMQP_PORT")         ?? "5672";
 
-// Bind management HTTP server to the configured port
-builder.WebHost.UseUrls($"http://0.0.0.0:{proxyMgmtPort}");
+// ── Kestrel: HTTP on mgmt port + HTTPS on 443 ───────────────────────────────
+// The ServiceBusAdministrationClient (used by MassTransit and others) derives
+// https://localhost:443 from the sb://localhost connection string.  We serve
+// the same management API on both ports so admin requests work transparently.
+//
+// If stack.ps1 generated a trusted cert (mounted at /cert/localhost.pfx), we
+// use that so applications don't need to skip certificate validation.
+// Otherwise we generate a self-signed cert at runtime as a fallback.
+
+var tlsCert = LoadMountedCert("/cert/localhost.pfx", "dev")
+           ?? GenerateSelfSignedCert("localhost");
+
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    kestrel.ListenAnyIP(int.Parse(proxyMgmtPort)); // HTTP management
+    kestrel.ListenAnyIP(443, listenOptions =>
+    {
+        listenOptions.UseHttps(tlsCert);
+    });
+});
 
 // Add environment variables as IConfiguration keys for DI
 builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -102,8 +122,49 @@ lifetime.ApplicationStopping.Register(() =>
 logger.LogInformation("ServiceBus Emulator Proxy is ready");
 logger.LogInformation("  AMQP endpoint: amqp://localhost:{AmqpPort}", proxyAmqpPort);
 logger.LogInformation("  Management:    http://localhost:{MgmtPort}", proxyMgmtPort);
+logger.LogInformation("  Admin HTTPS:   https://localhost:443");
 
 // ── Run ──────────────────────────────────────────────────────────────────────
 
 await app.RunAsync();
 return 0;
+
+// ─── TLS certificate loading ─────────────────────────────────────────────────
+// Prefer the host-generated cert (trusted by the OS) mounted at /cert/.
+// Fall back to a runtime-generated self-signed cert if the mount is absent.
+
+static X509Certificate2? LoadMountedCert(string pfxPath, string password)
+{
+    if (!File.Exists(pfxPath)) return null;
+    try
+    {
+        return X509CertificateLoader.LoadPkcs12FromFile(pfxPath, password,
+            X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.Exportable);
+    }
+    catch
+    {
+        return null; // fall through to self-signed generation
+    }
+}
+
+static X509Certificate2 GenerateSelfSignedCert(string cn)
+{
+    using var rsa = RSA.Create(2048);
+    var req = new CertificateRequest(
+        $"CN={cn}", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+
+    req.CertificateExtensions.Add(
+        new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: false));
+
+    var san = new SubjectAlternativeNameBuilder();
+    san.AddDnsName("localhost");
+    san.AddIpAddress(System.Net.IPAddress.Loopback);
+    req.CertificateExtensions.Add(san.Build());
+
+    var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddYears(5));
+
+    return X509CertificateLoader.LoadPkcs12(
+        cert.Export(X509ContentType.Pfx, ""),
+        "",
+        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.Exportable);
+}

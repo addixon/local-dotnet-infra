@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using ServiceBusProxy.Models;
 
@@ -127,7 +128,7 @@ sealed class ManagementProxy
         {
             try
             {
-                var url  = $"http://{instance.ContainerName}:5300{path}";
+                var url  = $"http://{instance.ContainerName}:5300{path}{context.Request.QueryString}";
                 var resp = await client.GetAsync(url);
 
                 if (resp.IsSuccessStatusCode)
@@ -216,7 +217,7 @@ sealed class ManagementProxy
     async Task ForwardRequestAsync(HttpContext context, EmulatorInstance instance, string path)
     {
         var client = _httpFactory.CreateClient("management");
-        var url    = $"http://{instance.ContainerName}:5300{path}";
+        var url    = $"http://{instance.ContainerName}:5300{path}{context.Request.QueryString}";
 
         using var request = new HttpRequestMessage(new HttpMethod(context.Request.Method), url);
 
@@ -231,6 +232,11 @@ sealed class ManagementProxy
         if (context.Request.ContentLength > 0 || context.Request.ContentType is not null)
         {
             var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
+
+            // PUT = create/update entity — clamp timespan properties to emulator limits
+            if (context.Request.Method == "PUT")
+                body = ClampTimespanProperties(body);
+
             request.Content = new StringContent(body, Encoding.UTF8,
                 context.Request.ContentType ?? "application/xml");
         }
@@ -251,6 +257,53 @@ sealed class ManagementProxy
 
         var responseBody = await response.Content.ReadAsStringAsync();
         await context.Response.WriteAsync(responseBody);
+    }
+
+    // ── Emulator timespan clamping ─────────────────────────────────────────
+
+    // The Azure ServiceBus Emulator enforces a strict 1-hour ceiling on
+    // duration properties.  Real Azure ServiceBus accepts up to 14+ days.
+    // MassTransit defaults to 366 days.  Rather than force every consumer
+    // to override settings, the proxy transparently clamps durations in
+    // the Atom XML body before forwarding to the emulator.
+
+    static readonly TimeSpan EmulatorMaxTtl = TimeSpan.FromHours(1);
+
+    static readonly HashSet<string> TimespanElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "DefaultMessageTimeToLive",
+        "DuplicateDetectionHistoryTimeWindow",
+        "LockDuration",
+        "AutoDeleteOnIdle"
+    };
+
+    string ClampTimespanProperties(string xmlBody)
+    {
+        XDocument doc;
+        try { doc = XDocument.Parse(xmlBody); }
+        catch { return xmlBody; } // not valid XML — pass through unchanged
+
+        var changed = false;
+
+        foreach (var element in doc.Descendants())
+        {
+            if (element.Name.Namespace != SbNs) continue;
+            if (!TimespanElements.Contains(element.Name.LocalName)) continue;
+
+            TimeSpan parsed;
+            try { parsed = XmlConvert.ToTimeSpan(element.Value); }
+            catch { continue; }
+
+            if (parsed <= EmulatorMaxTtl) continue;
+
+            var original = element.Value;
+            element.Value = XmlConvert.ToString(EmulatorMaxTtl);
+            changed = true;
+            _logger.LogDebug("Clamped {Element} from {Original} to {Clamped}",
+                element.Name.LocalName, original, element.Value);
+        }
+
+        return changed ? doc.ToString(SaveOptions.DisableFormatting) : xmlBody;
     }
 
     // ── Path parsing helpers ─────────────────────────────────────────────────
