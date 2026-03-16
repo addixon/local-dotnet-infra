@@ -212,6 +212,7 @@ sealed class EmulatorOrchestrator : IAsyncDisposable
     async Task<string> CreateSqlContainerAsync(string name)
     {
         await RemoveContainerIfExistsAsync(name);
+        await EnsureImageAsync(SqlImage);
 
         var response = await _docker.Containers.CreateContainerAsync(new CreateContainerParameters
         {
@@ -252,6 +253,7 @@ sealed class EmulatorOrchestrator : IAsyncDisposable
         string name, string sqlName, string configPath, int amqpPort, int mgmtPort)
     {
         await RemoveContainerIfExistsAsync(name);
+        await EnsureImageAsync(EmulatorImage);
 
         // Compute the HOST-side path for the config file.
         // The proxy container's /emulator-configs is bind-mounted from the host;
@@ -447,6 +449,27 @@ sealed class EmulatorOrchestrator : IAsyncDisposable
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    async Task EnsureImageAsync(string image)
+    {
+        try
+        {
+            await _docker.Images.InspectImageAsync(image);
+        }
+        catch (DockerImageNotFoundException)
+        {
+            _logger.LogInformation("Pulling image {Image}…", image);
+            await _docker.Images.CreateImageAsync(
+                new ImagesCreateParameters { FromImage = image },
+                null,
+                new Progress<JSONMessage>(m =>
+                {
+                    if (!string.IsNullOrEmpty(m.Status))
+                        _logger.LogDebug("  {Status}", m.Status);
+                }));
+            _logger.LogInformation("Image {Image} pulled successfully", image);
+        }
+    }
 
     async Task RemoveContainerIfExistsAsync(string name)
     {
