@@ -105,7 +105,7 @@ function Write-Banner {
     $bar = '─' * 53
     Write-Host ''
     Write-Host "  $(BCyan "╭${bar}╮")"
-    Write-Host "  $(BCyan "│")    $(BWhite "service-bus")$(Dim "  ·  Emulator proxy manager")         $(BCyan "│")"
+    Write-Host "  $(BCyan "│")    $(BWhite "service-bus")$(Dim "  ·  Emulator proxy manager")           $(BCyan "│")"
     Write-Host "  $(BCyan "╰${bar}╯")"
     Write-Host ''
 }
@@ -423,7 +423,7 @@ function Invoke-Start {
 
     Write-Step 'Building proxy image…'
     Write-Host ''
-    $null = Invoke-Compose @('build', $Script:ComposeServices)
+    $null = Invoke-Compose (@('build') + $Script:ComposeServices)
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
         Write-Fail 'Failed to build proxy image.'
@@ -468,14 +468,15 @@ function Invoke-Stop {
         Write-Success "Stopped $($ids.Count) proxy-managed container(s)."
     }
 
-    Write-Step 'Running docker compose down for Service Bus proxy…'
+    Write-Step 'Stopping servicebus-proxy container…'
     Write-Host ''
-    $rc = Invoke-Compose @('down') # only proxy was started so compose will only stop it
+    $rc = Invoke-Compose (@('stop') + $Script:ComposeServices)
     if ($rc -ne 0) {
         Write-Host ''
-        Write-Fail "docker compose down failed (exit code $rc)."
+        Write-Fail "docker compose stop failed (exit code $rc)."
         exit 1
     }
+    $null = Invoke-Compose (@('rm', '-f') + $Script:ComposeServices)
     Write-Host ''
     Write-Step 'Verifying containers are removed…'
     $still = @($Script:ServiceDefs | Where-Object { (Get-CStatus $_.Container) -ne 'absent' })
@@ -503,18 +504,19 @@ function Invoke-Restart {
         Write-Success "Stopped $($ids.Count) proxy-managed container(s)."
     }
 
-    Write-Step 'Stopping containers…'
+    Write-Step 'Stopping servicebus-proxy container…'
     Write-Host ''
-    $rc = Invoke-Compose @('down')
+    $rc = Invoke-Compose (@('stop') + $Script:ComposeServices)
     if ($rc -ne 0) {
         Write-Host ''
-        Write-Fail "docker compose down failed (exit code $rc)."
+        Write-Fail "docker compose stop failed (exit code $rc)."
         exit 1
     }
+    $null = Invoke-Compose (@('rm', '-f') + $Script:ComposeServices)
     Write-Host ''
     Write-Step 'Building proxy image…'
     Write-Host ''
-    $null = Invoke-Compose @('build', $Script:ComposeServices)
+    $null = Invoke-Compose (@('build') + $Script:ComposeServices)
     if ($LASTEXITCODE -ne 0) {
         Write-Host ''
         Write-Fail 'Failed to build proxy image.'
@@ -576,15 +578,16 @@ function Invoke-Nuke {
     }
     Write-Host ''
 
-    # Stop the proxy container and remove only the servicebus_proxy_state volume
-    Write-Step 'Stopping Service Bus proxy container…'
+    # Stop and remove only the servicebus-proxy container (not the full stack)
+    Write-Step 'Stopping servicebus-proxy container…'
     Write-Host ''
-    $rc = Invoke-Compose @('down')
+    $rc = Invoke-Compose (@('stop') + $Script:ComposeServices)
     if ($rc -ne 0) {
         Write-Host ''
-        Write-Fail "docker compose down failed (exit code $rc)."
+        Write-Fail "docker compose stop failed (exit code $rc)."
         exit 1
     }
+    $null = Invoke-Compose (@('rm', '-f') + $Script:ComposeServices)
     Write-Host ''
 
     # Remove only the Service Bus proxy state volume
@@ -632,7 +635,7 @@ function Invoke-Logs ([string]$SvcFilter) {
         Invoke-Compose 'logs', '--tail=100', '-f', $SvcFilter
     } else {
         Write-Header 'Logs — Service Bus proxy  (Ctrl+C to stop)'
-        Invoke-Compose @('logs', '--tail=50', '-f', $Script:ComposeServices)
+        Invoke-Compose (@('logs', '--tail=50', '-f') + $Script:ComposeServices)
     }
 }
 
@@ -640,7 +643,7 @@ function Invoke-Pull {
     Write-Header 'Pulling latest images'
     Write-Step 'Pulling images — this may take a while…'
     Write-Host ''
-    $rc = Invoke-Compose @('pull', $Script:ComposeServices)
+    $rc = Invoke-Compose (@('pull') + $Script:ComposeServices)
     if ($rc -ne 0) {
         Write-Host ''
         Write-Fail "docker compose pull failed (exit code $rc)."
