@@ -10,6 +10,7 @@ A Docker-based local development stack providing **MS SQL Server 2025**, **Postg
 - [Prerequisites](#prerequisites)
 - [Installing Docker on Windows (license-free)](#installing-docker-on-windows-license-free)
 - [Managing the stack](#managing-the-stack)
+- [Service Bus only](#service-bus-only)
 - [Quick start](#quick-start)
 - [`.env` reference](#env-reference)
 - [Connection strings](#connection-strings)
@@ -90,6 +91,33 @@ the appropriate `docker compose` commands, and verifies the outcome after each a
 | `monitor` | Launch the interactive Service Bus message monitor TUI (see [Service Bus Monitor](#service-bus-monitor)) |
 
 Running `.\stack.ps1` with no arguments prints the usage summary.
+
+---
+
+## Service Bus only
+
+If you only need the Azure Service Bus Emulator Proxy — without MS SQL Server or
+PostgreSQL — use `sb.ps1` instead. It supports the same actions as `stack.ps1`
+but only starts the Service Bus portion of the stack.
+
+```powershell
+.\sb.ps1 <action> [service]
+```
+
+| Action | Description |
+|---|---|
+| `start` | Bring up the Service Bus proxy; polls until healthy |
+| `stop` | Stop and remove Service Bus containers (data volumes preserved) |
+| `restart` | Full stop/start cycle; waits until healthy |
+| `nuke` | Destroy Service Bus containers **and** volumes ⚠ — database services are NOT affected |
+| `status` | Print the current health/status of Service Bus containers |
+| `logs` | Stream live logs from the Service Bus proxy (Ctrl+C to stop) |
+| `logs servicebus-proxy` | Stream logs from the proxy service |
+| `pull` | Pull the latest proxy image without starting |
+| `monitor` | Launch the interactive Service Bus message monitor TUI |
+
+The `.env` file is still required but only `SERVICEBUS_SQL_PASSWORD` (and optionally the
+`SERVICEBUS_PORT`, `SERVICEBUS_MGMT_PORT`, `SERVICEBUS_ADMIN_PORT` overrides) need to be set.
 
 ---
 
@@ -404,7 +432,8 @@ If your application can't connect:
 ├── .env.example              # Safe-to-commit template — copy to .env and fill in secrets
 ├── .gitignore                # Ensures .env and Config.json are never committed
 ├── docker-compose.yml        # All service definitions with health checks
-├── stack.ps1                 # PowerShell stack manager (start/stop/restart/nuke/status/logs/pull/monitor)
+├── stack.ps1                 # PowerShell stack manager — full stack (start/stop/restart/nuke/status/logs/pull/monitor)
+├── sb.ps1                    # PowerShell stack manager — Service Bus only (same actions, no databases)
 ├── README.md                 # This documentation
 ├── docs/
 │   ├── FUTURE-MULTIPLEXING.md    # Spec for full AMQP connection multiplexing
